@@ -25,7 +25,7 @@ import { id } from 'date-fns/locale';
 
 type ViewType = 'dashboard' | 'patients' | 'visits' | 'immunizations' | 'growth' | 'vitamins';
 
-function App() {
+function DashboardApp() {
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [stats, setStats] = useState<DashboardStats>({
@@ -1550,6 +1550,19 @@ function VitaminForm({ onSave }: { onSave: () => void }) {
       </div>
     </form>
   );
+}
+
+import { Routes, Route } from "react-router-dom"
+import AdminLogin from "./pages/AdminLogin"
+
+function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<DashboardApp />} />
+      <Route path="/admin/dashboard" element={<DashboardApp />} />
+      <Route path="/admin/login" element={<AdminLogin />} />
+    </Routes>
+  )
 }
 
 export default App;
