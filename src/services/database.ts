@@ -16,7 +16,13 @@ class DatabaseService {
   // Patients
   static getPatients(): Patient[] {
     const data = localStorage.getItem(DB_KEYS.PATIENTS);
-    return data ? JSON.parse(data) : [];
+    try {
+      const parsed = data ? JSON.parse(data) : [];
+      return Array.isArray(parsed) ? parsed.filter(p => p && typeof p === 'object' && p.id) : [];
+    } catch (e) {
+      console.error('Error parsing patients data', e);
+      return [];
+    }
   }
 
   static getPatientById(id: string): Patient | null {
@@ -57,11 +63,16 @@ class DatabaseService {
   // Visits
   static getVisits(): Visit[] {
     const data = localStorage.getItem(DB_KEYS.VISITS);
-    return data ? JSON.parse(data) : [];
+    try {
+      const parsed = data ? JSON.parse(data) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      return [];
+    }
   }
 
   static getVisitsByPatient(patientId: string): Visit[] {
-    return this.getVisits().filter(v => v.patient_id === patientId);
+    return this.getVisits().filter(v => v && v.patient_id === patientId);
   }
 
   static saveVisit(visit: Visit): void {
@@ -88,11 +99,16 @@ class DatabaseService {
   // Immunizations
   static getImmunizations(): Immunization[] {
     const data = localStorage.getItem(DB_KEYS.IMMUNIZATIONS);
-    return data ? JSON.parse(data) : [];
+    try {
+      const parsed = data ? JSON.parse(data) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      return [];
+    }
   }
 
   static getImmunizationsByPatient(patientId: string): Immunization[] {
-    return this.getImmunizations().filter(i => i.patient_id === patientId);
+    return this.getImmunizations().filter(i => i && i.patient_id === patientId);
   }
 
   static saveImmunization(immunization: Immunization): void {
@@ -119,11 +135,16 @@ class DatabaseService {
   // Growth Records
   static getGrowthRecords(): GrowthRecord[] {
     const data = localStorage.getItem(DB_KEYS.GROWTH_RECORDS);
-    return data ? JSON.parse(data) : [];
+    try {
+      const parsed = data ? JSON.parse(data) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      return [];
+    }
   }
 
   static getGrowthRecordsByPatient(patientId: string): GrowthRecord[] {
-    return this.getGrowthRecords().filter(g => g.patient_id === patientId);
+    return this.getGrowthRecords().filter(g => g && g.patient_id === patientId);
   }
 
   static saveGrowthRecord(record: GrowthRecord): void {
@@ -145,11 +166,16 @@ class DatabaseService {
   // Vitamin Distribution
   static getVitaminDistributions(): VitaminDistribution[] {
     const data = localStorage.getItem(DB_KEYS.VITAMINS);
-    return data ? JSON.parse(data) : [];
+    try {
+      const parsed = data ? JSON.parse(data) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      return [];
+    }
   }
 
   static getVitaminDistributionsByPatient(patientId: string): VitaminDistribution[] {
-    return this.getVitaminDistributions().filter(v => v.patient_id === patientId);
+    return this.getVitaminDistributions().filter(v => v && v.patient_id === patientId);
   }
 
   static saveVitaminDistribution(vitamin: VitaminDistribution): void {

@@ -22,7 +22,7 @@ export default function LoginMasyarakat() {
 
     try {
       // Simulasi login untuk demo jika API belum siap
-      if (email === "admin@posyandu.id" && password === "admin123") {
+      if (email === "admin@gmail.com" && password === "admin123") {
         toast.success("Selamat Datang, Admin!")
         localStorage.setItem("userRole", "admin")
         localStorage.setItem("userName", "Admin Posyandu")

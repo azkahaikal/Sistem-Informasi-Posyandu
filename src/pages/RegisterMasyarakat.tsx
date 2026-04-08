@@ -19,6 +19,19 @@ export default function RegisterMasyarakat() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    // Validation for 6 characters and uniqueness
+    if (password.length !== 6) {
+      toast.error("Password harus tepat 6 karakter/token!")
+      return
+    }
+
+    const isUnique = new Set(password).size === password.length
+    if (!isUnique) {
+      toast.error("Password harus unik (tidak boleh ada karakter yang sama)!")
+      return
+    }
+
     setLoading(true)
 
     try {
@@ -107,13 +120,13 @@ export default function RegisterMasyarakat() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="password" title="password" className="text-emerald-900 font-black text-xs uppercase tracking-widest ml-1">Password Baru</Label>
+                <Label htmlFor="password" title="password unik 6 token" className="text-emerald-900 font-black text-xs uppercase tracking-widest ml-1">Password Baru (6 Token Unik)</Label>
                 <div className="relative group">
                   <Lock className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-emerald-300 group-focus-within:text-emerald-600 transition-colors" />
                   <Input
                     id="password"
                     type="password"
-                    placeholder="Minimal 8 karakter"
+                    placeholder="Tepat 6 Karakter Unik"
                     className="pl-12 h-14 border-green-50 focus:border-emerald-300 rounded-2xl bg-white shadow-sm font-medium"
                     value={password}
                     onChange={e => setPassword(e.target.value)}

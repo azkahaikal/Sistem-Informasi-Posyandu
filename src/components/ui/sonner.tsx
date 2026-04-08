@@ -9,7 +9,14 @@ import { useTheme } from "next-themes"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme()
+  let theme = "system"
+  try {
+    const themeContext = useTheme()
+    theme = themeContext.theme || "system"
+  } catch (e) {
+    // Fallback if useTheme is used outside of ThemeProvider
+    theme = "light"
+  }
 
   return (
     <Sonner
