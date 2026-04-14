@@ -1,36 +1,51 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { Patient, GrowthRecord } from '@/types';
 import DatabaseService from '@/services/database';
+import { calculateNutritionStatus } from '@/lib/nutrition';
+import { Badge } from '@/components/ui/badge';
 
 interface GrowthFormProps {
   patient: Patient;
+  record?: GrowthRecord;
   onSuccess: () => void;
   onCancel: () => void;
 }
 
-export default function GrowthForm({ patient, onSuccess, onCancel }: GrowthFormProps) {
+export default function GrowthForm({ patient, record, onSuccess, onCancel }: GrowthFormProps) {
   if (!patient) return null;
 
   const [formData, setFormData] = useState<Partial<GrowthRecord>>({
     patient_id: patient.id,
-    tanggal: new Date().toISOString().split('T')[0],
-    berat_badan: undefined,
-    tinggi_badan: undefined,
-    lingkar_kepala: undefined,
-    status_gizi: 'baik',
+    tanggal: record?.tanggal || new Date().toISOString().split('T')[0],
+    berat_badan: record?.berat_badan,
+    tinggi_badan: record?.tinggi_badan,
+    lingkar_kepala: record?.lingkar_kepala,
+    status_gizi: record?.status_gizi || 'Normal',
   });
+
+  const [calculatedStatus, setCalculatedStatus] = useState<any>(null);
+
+  useEffect(() => {
+    if (formData.berat_badan && formData.tinggi_badan && formData.tanggal) {
+      const result = calculateNutritionStatus(patient, formData.berat_badan, formData.tinggi_badan, formData.tanggal);
+      setCalculatedStatus(result);
+      setFormData(prev => ({ ...prev, status_gizi: result.status }));
+    }
+  }, [formData.berat_badan, formData.tinggi_badan, formData.tanggal, patient]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const record: GrowthRecord = {
+    const newRecord: GrowthRecord = {
       ...formData as GrowthRecord,
-      id: Math.random().toString(36).substring(2, 9),
-      created_at: new Date().toISOString(),
+      id: record?.id || Math.random().toString(36).substring(2, 9),
+      wfa_zscore: calculatedStatus?.wfaZ || record?.wfa_zscore,
+      hfa_zscore: calculatedStatus?.hfaZ || record?.hfa_zscore,
+      created_at: record?.created_at || new Date().toISOString(),
     };
-    DatabaseService.saveGrowthRecord(record);
+    DatabaseService.saveGrowthRecord(newRecord);
     onSuccess();
   };
 
@@ -99,20 +114,35 @@ export default function GrowthForm({ patient, onSuccess, onCancel }: GrowthFormP
           />
         </div>
         <div className="space-y-2">
-          <Label className="text-[10px] font-black uppercase text-gray-400">Status Gizi (Awal)</Label>
-          <select 
-            name="status_gizi" 
-            value={formData.status_gizi} 
-            onChange={handleChange} 
-            className="w-full h-12 rounded-xl border border-green-100 bg-white px-3 font-bold text-emerald-900"
-          >
-            <option value="baik">Gizi Baik (Normal)</option>
-            <option value="kurang">Gizi Kurang</option>
-            <option value="buruk">Gizi Buruk</option>
-            <option value="lebih">Gizi Lebih</option>
-          </select>
+          <Label className="text-[10px] font-black uppercase text-gray-400">Status Gizi (WHO)</Label>
+          <div className="h-12 rounded-xl border border-green-100 bg-emerald-50/30 flex items-center px-3">
+             {calculatedStatus ? (
+               <Badge className={`border-none font-bold uppercase text-[9px] tracking-widest ${
+                 calculatedStatus.primaryStatus === 'Gizi Baik' ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-600'
+               }`}>
+                 {calculatedStatus.status}
+               </Badge>
+             ) : (
+               <span className="text-xs text-gray-400 font-medium italic">Menunggu input data...</span>
+             )}
+          </div>
         </div>
       </div>
+
+      {calculatedStatus && (
+        <div className="p-4 rounded-2xl border border-emerald-100 bg-white space-y-2 shadow-sm">
+           <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest text-gray-400">
+              <span>Z-Score BB/U</span>
+              <span className={calculatedStatus.wfaZ < -2 ? 'text-rose-500' : 'text-emerald-600'}>{calculatedStatus.wfaZ} SD</span>
+           </div>
+           <div className="w-full bg-gray-100 h-1.5 rounded-full overflow-hidden">
+              <div 
+                className={`h-full transition-all ${calculatedStatus.wfaZ < -2 ? 'bg-rose-500' : 'bg-emerald-500'}`} 
+                style={{ width: `${Math.min(Math.max((calculatedStatus.wfaZ + 4) * 20, 0), 100)}%` }} 
+              />
+           </div>
+        </div>
+      )}
 
       <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-100">
         <p className="text-[11px] text-emerald-700 font-medium leading-relaxed">

@@ -1,1003 +1,764 @@
 import { useState, useEffect } from 'react';
 import { 
-  Users, Baby, Syringe, Activity, 
-  Pill, Plus, Search, Edit2,
-  Eye, ChevronLeft, ChevronRight,
-  Heart, User, LogOut, Settings, Stethoscope, ClipboardPlus, FileSpreadsheet,
-  Bell, BellDot, HeartPulse, UserCircle
+  Users, Activity, 
+  User, FileSpreadsheet,
+  HeartPulse, Utensils, TrendingUp,
+  Download, UserPlus, Trash2, FileText, Bell,
+  Newspaper, BookOpen, Globe, ExternalLink, Search, Plus, Edit2, ChevronLeft,
+  Heart, Map as MapIcon, ShieldCheck
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { 
-  DropdownMenu, 
-  DropdownMenuContent, 
-  DropdownMenuItem, 
-  DropdownMenuLabel, 
-  DropdownMenuSeparator, 
-  DropdownMenuTrigger 
-} from '@/components/ui/dropdown-menu';
-import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Label } from '@/components/ui/label';
+
+import { Separator } from '@/components/ui/separator';
 import DatabaseService from '@/services/database';
-import type { Patient, DashboardStats } from '@/types';
+import type { Patient, DashboardStats, UserRole, GrowthRecord } from '@/types';
+import { WHO_GLOBAL_AVERAGES } from '@/lib/nutrition';
 import { format } from 'date-fns';
-import { id } from 'date-fns/locale/id';
+import { id } from 'date-fns/locale';
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
+import { ResponsiveContainer, Tooltip as RechartsTooltip, LineChart, Line, XAxis, YAxis, CartesianGrid, Legend } from 'recharts';
+import { toast } from 'sonner';
 import "@/health-theme.css";
 
-// Form Components
-import VisitForm from '@/components/posyandu/VisitForm';
-import ImmunizationForm from '@/components/posyandu/ImmunizationForm';
+// Feature Components
 import GrowthForm from '@/components/posyandu/GrowthForm';
-import VitaminForm from '@/components/posyandu/VitaminForm';
+import MealPlanner from '@/components/posyandu/MealPlanner';
 
-type ViewType = 'dashboard' | 'patients' | 'visits' | 'immunizations' | 'growth' | 'vitamins' | 'reports' | 'profile';
-type ActionType = 'none' | 'visit' | 'immunization' | 'growth' | 'vitamin';
+import SidebarNav from '@/components/posyandu/SidebarNav';
+import AnnouncementView from '@/pages/AnnouncementView';
+import PatientDetailView from '@/pages/PatientDetailView';
+import UserManagementView from '@/pages/UserManagementView';
+
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import NotificationPanel from '@/components/posyandu/NotificationPanel';
+
+type ViewType = 'dashboard' | 'patients' | 'growth' | 'meal-planner' | 'users' | 'reports' | 'announcements';
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
   const [currentView, setCurrentView] = useState<ViewType>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const userRole = localStorage.getItem("userRole") || "masyarakat";
-  const userName = localStorage.getItem("userName") || "User";
-  const isAdmin = userRole === "admin";
+  
+  // Auth & Roles
+  const userRole = (localStorage.getItem("userRole") as UserRole) || "nakes";
+  const userName = localStorage.getItem("userName") || "Petugas Kesehatan";
+  const userPatientId = localStorage.getItem("userPatientId"); 
 
-  // Action Dialog States
-  const [activeAction, setActiveAction] = useState<ActionType>('none');
+  const isParent = userRole === "orang_tua";
+
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [patients, setPatients] = useState<Patient[]>([]);
+  
+  // Action States
+  const [activeAction, setActiveAction] = useState<'none' | 'growth' | 'edit_growth'>('none');
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
-  const [isPatientPickerOpen, setIsPatientPickerOpen] = useState(false);
-
-  const [stats, setStats] = useState<DashboardStats>({
-    total_pasien: 0,
-    total_ibu_hamil: 0,
-    total_balita: 0,
-    total_bayi: 0,
-    kunjungan_hari_ini: 0,
-    kunjungan_bulan_ini: 0,
-    imunisasi_bulan_ini: 0,
-  });
+  const [isAddingPatient, setIsAddingPatient] = useState(false);
+  const [isEditingPatient, setIsEditingPatient] = useState(false);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
 
   useEffect(() => {
     DatabaseService.initSampleData();
-    refreshStats();
-  }, []);
+    refreshData();
+    if (isParent) setCurrentView('dashboard');
+  }, [userRole, isParent]);
 
-  const refreshStats = () => {
+  const refreshData = () => {
     setStats(DatabaseService.getDashboardStats());
+    setPatients(DatabaseService.getPatients());
   };
 
   const handleLogout = () => {
     localStorage.clear();
-    navigate("/login");
+    toast.success("Berhasil keluar sistem");
+    navigate('/login');
   };
 
-  const openActionForm = (type: ActionType, patient?: Patient) => {
-    setActiveAction(type);
-    if (patient) {
-      setSelectedPatient(patient);
-    } else {
-      setIsPatientPickerOpen(true);
+  const handleDeletePatient = (id: string) => {
+    if (confirm("Apakah Anda yakin ingin menghapus data pasien ini?")) {
+      DatabaseService.deletePatient(id);
+      toast.success("Data pasien berhasil dihapus");
+      refreshData();
     }
   };
 
-  const handlePatientSelected = (patient: Patient) => {
-    setSelectedPatient(patient);
-    setIsPatientPickerOpen(false);
+  const handleDeleteGrowth = (id: string) => {
+    if (confirm("Apakah Anda yakin ingin menghapus data pengukuran ini?")) {
+      DatabaseService.deleteGrowthRecord(id);
+      toast.success("Data pengukuran berhasil dihapus");
+      refreshData();
+    }
   };
-
-  const closeActionForm = () => {
-    setActiveAction('none');
-    setSelectedPatient(null);
-    refreshStats();
-  };
-
-  const menuItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: Activity },
-    { id: 'patients', label: 'Data Pasien', icon: Users },
-    { id: 'visits', label: 'Kunjungan', icon: Stethoscope },
-    { id: 'immunizations', label: 'Imunisasi', icon: Syringe },
-    { id: 'growth', label: 'Pertumbuhan', icon: Baby },
-    { id: 'vitamins', label: 'Vitamin', icon: Pill },
-    { id: 'reports', label: 'Laporan', icon: FileSpreadsheet },
-  ];
 
   const renderContent = () => {
+    if (isParent && currentView === 'patients') {
+       const myData = patients.find(p => p.id === userPatientId) || patients[0];
+       return myData ? <PatientDetailView patient={myData} /> : <div>Data tidak ditemukan</div>;
+    }
+
     switch (currentView) {
       case 'dashboard':
-        return <DashboardView stats={stats} isAdmin={isAdmin} onAction={openActionForm} />;
+        return <DashboardView 
+          stats={stats} 
+          role={userRole} 
+          onAddPatient={() => setIsAddingPatient(true)}
+          onInputGrowth={() => { setSelectedPatient(patients[0]); setActiveAction('growth'); }}
+          onMealPlan={() => setCurrentView('meal-planner')}
+        />;
       case 'patients':
-        return <PatientsView onRefresh={refreshStats} isAdmin={isAdmin} onAction={openActionForm} />;
-      case 'visits':
-        return <VisitsView isAdmin={isAdmin} onAction={() => openActionForm('visit')} />;
-      case 'immunizations':
-        return <ImmunizationsView isAdmin={isAdmin} onAction={() => openActionForm('immunization')} />;
+        return <PatientsView 
+          role={userRole} 
+          onRefresh={refreshData} 
+          onAdd={() => setIsAddingPatient(true)} 
+          onEdit={(p: Patient) => { setSelectedPatient(p); setIsEditingPatient(true); }}
+          onDelete={(id: string) => handleDeletePatient(id)}
+        />;
       case 'growth':
-        return <GrowthView isAdmin={isAdmin} onAction={() => openActionForm('growth')} />;
-      case 'vitamins':
-        return <VitaminsView isAdmin={isAdmin} onAction={() => openActionForm('vitamin')} />;
-      case 'profile':
-        return <ProfileView name={userName} role={userRole} />;
+        return <GrowthMonitoringView 
+          patients={patients}
+          onInput={() => setActiveAction('growth')} 
+          onEdit={(_: GrowthRecord) => { setActiveAction('edit_growth'); }}
+          onDelete={handleDeleteGrowth}
+        />;
+      case 'announcements':
+        return <AnnouncementView />;
+      case 'meal-planner':
+        return <MealPlannerMainView patients={patients} role={userRole} myPatientId={userPatientId} />;
+      case 'users':
+        return <UserManagementView />;
+      case 'reports':
+        return <ReportsView stats={stats} />;
       default:
-        return <div className="flex flex-col items-center justify-center h-[60vh] text-gray-400">
-          <Stethoscope className="w-16 h-16 mb-4 opacity-20" />
-          <p className="text-lg font-medium">Modul {currentView} sedang dalam pengembangan</p>
-        </div>;
+        return <DashboardView stats={stats} role={userRole} onAddPatient={() => setIsAddingPatient(true)} onInputGrowth={() => {}} onMealPlan={() => setCurrentView('meal-planner')} />;
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#f0fdf4] flex overflow-hidden font-sans">
-      {/* Sidebar */}
-      <motion.aside 
-        initial={false}
-        animate={{ width: sidebarOpen ? 260 : 80 }}
-        className="bg-white border-r border-green-100 shadow-xl z-20 flex flex-col"
-      >
-        <div className="p-6 border-b border-green-50">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-200">
-              <HeartPulse className="w-6 h-6 text-white" />
-            </div>
-            {sidebarOpen && (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="overflow-hidden whitespace-nowrap"
-              >
-                <h1 className="font-bold text-emerald-900 text-base">Posyandu Kita</h1>
-                <p className="text-[10px] text-emerald-600 font-bold tracking-wider uppercase">{isAdmin ? "Admin Panel" : "Layanan Masyarakat"}</p>
-              </motion.div>
-            )}
+    <div className="flex h-screen overflow-hidden bg-[#f8fafc] font-sans text-emerald-950">
+      <SidebarNav 
+        currentView={currentView}
+        setCurrentView={setCurrentView}
+        sidebarOpen={sidebarOpen}
+        setSidebarOpen={setSidebarOpen}
+        userRole={userRole}
+        onLogout={handleLogout}
+        onOpenProfile={() => setIsProfileOpen(true)}
+      />
+
+      <div className="flex-1 flex flex-col min-w-0 bg-[#f0fdf4]/30 relative">
+        {/* Unified Header */}
+        <header className="h-24 bg-white/80 backdrop-blur-md border-b border-emerald-50 px-10 flex items-center justify-between shrink-0 z-20">
+          <div className="flex items-center gap-4">
+            <h2 className="text-2xl font-black uppercase tracking-tight text-emerald-950">
+              {currentView === 'dashboard' ? 'Beranda Utama' : 
+               currentView === 'patients' ? 'Data Kesehatan KIA' :
+               currentView === 'growth' ? 'Status Gizi WHO' :
+               currentView === 'announcements' ? 'Pengumuman & Jadwal' :
+               currentView === 'meal-planner' ? 'Rencana Makan' :
+               currentView === 'users' ? 'Manajemen User' : 'Rekap Laporan'}
+            </h2>
+            <Badge variant="outline" className="hidden md:flex border-emerald-100 text-emerald-600 font-bold px-4 py-1 rounded-full text-xs">
+              {format(new Date(), 'EEEE, d MMMM yyyy', { locale: id })}
+            </Badge>
           </div>
-        </div>
 
-        <ScrollArea className="flex-1 px-3 py-4">
-          <nav className="space-y-2">
-            {menuItems.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => setCurrentView(item.id as ViewType)}
-                className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 sidebar-item ${
-                  currentView === item.id 
-                    ? 'bg-emerald-50 text-emerald-700 active shadow-sm ring-1 ring-emerald-100' 
-                    : 'text-gray-500 hover:bg-green-50/50 hover:text-emerald-600'
-                }`}
-              >
-                <item.icon className={`w-5 h-5 flex-shrink-0 ${currentView === item.id ? 'text-emerald-600' : ''}`} />
-                {sidebarOpen && <span className="text-sm font-semibold">{item.label}</span>}
-              </button>
-            ))}
-          </nav>
-          
-          <div className="mt-8 pt-8 border-t border-green-50 px-3">
-            <button
-              onClick={handleLogout}
-              className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-red-500 hover:bg-red-50 transition-colors group"
-            >
-              <LogOut className="w-5 h-5 flex-shrink-0 group-hover:translate-x-1 transition-transform" />
-              {sidebarOpen && <span className="text-sm font-semibold">Keluar Sistem</span>}
-            </button>
-          </div>
-        </ScrollArea>
-
-        <div className="p-4 bg-emerald-50/50 border-t border-green-50">
-          <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="w-full flex justify-center p-2 rounded-lg hover:bg-emerald-100 text-emerald-600 transition-colors"
-          >
-            {sidebarOpen ? <ChevronLeft className="w-5 h-5" /> : <ChevronRight className="w-5 h-5" />}
-          </button>
-        </div>
-      </motion.aside>
-
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col relative overflow-hidden">
-        {/* Header */}
-        <header className="bg-white/80 backdrop-blur-md border-b border-green-100 px-8 py-4 z-10 sticky top-0">
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-2xl font-bold text-emerald-900 font-serif">
-                {menuItems.find(m => m.id === currentView)?.label || 'Profil'}
-              </h2>
-              <p className="text-xs text-emerald-600/70 font-medium">
-                {(() => {
-                  try {
-                    return format(new Date(), 'EEEE, d MMMM yyyy', { locale: id });
-                  } catch (e) {
-                    return format(new Date(), 'EEEE, d MMMM yyyy');
-                  }
-                })()}
-              </p>
-            </div>
-
-            <div className="flex items-center gap-6">
-              <button className="relative p-2 text-gray-400 hover:text-emerald-600 transition-colors">
-                <Bell className="w-5 h-5" />
-                <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
-              </button>
-              
-              <Separator orientation="vertical" className="h-8 bg-green-100" />
-              
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button className="flex items-center gap-3 p-1 pr-3 rounded-full hover:bg-emerald-50 transition-all group">
-                    <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center border-2 border-emerald-200 group-hover:scale-105 transition-transform">
-                      <User className="w-5 h-5 text-emerald-600" />
-                    </div>
-                    <div className="text-left hidden md:block">
-                      <p className="text-sm font-bold text-emerald-900">{userName}</p>
-                      <p className="text-[10px] text-emerald-600 font-bold uppercase tracking-tighter">{userRole}</p>
-                    </div>
+          <div className="flex items-center gap-6">
+             <Popover>
+                <PopoverTrigger asChild>
+                  <button className="relative p-3 text-emerald-600 hover:bg-emerald-50 rounded-2xl transition-all active:scale-90">
+                    <Bell className="w-6 h-6" />
+                    <span className="absolute top-2.5 right-2.5 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white shadow-sm animate-pulse"></span>
                   </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56 rounded-xl border-green-100 shadow-xl">
-                  <DropdownMenuLabel>Akun Saya</DropdownMenuLabel>
-                  <DropdownMenuSeparator className="bg-green-50" />
-                  <DropdownMenuItem onClick={() => setCurrentView('profile')} className="cursor-pointer">
-                    <UserCircle className="w-4 h-4 mr-2 text-emerald-500" />
-                    Profil Detail
-                  </DropdownMenuItem>
-                  <DropdownMenuItem className="cursor-pointer">
-                    <Settings className="w-4 h-4 mr-2 text-emerald-500" />
-                    Pengaturan
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator className="bg-green-50" />
-                  <DropdownMenuItem onClick={handleLogout} className="text-red-600 cursor-pointer">
-                    <LogOut className="w-4 h-4 mr-2" />
-                    Keluar
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="p-0 border-none shadow-none bg-transparent">
+                  <NotificationPanel />
+                </PopoverContent>
+             </Popover>
+
+             <div className="h-10 w-px bg-emerald-100 hidden md:block" />
+
+             <div className="flex items-center gap-4 group cursor-pointer" onClick={() => setIsProfileOpen(true)}>
+                <div className="text-right hidden lg:block">
+                    <p className="text-sm font-black text-emerald-950 leading-none">{userName}</p>
+                    <p className="text-[10px] text-emerald-500 font-bold uppercase mt-1 tracking-wider opacity-70">{userRole.replace('_', ' ')}</p>
+                </div>
+                <div className="w-12 h-12 bg-emerald-500 rounded-2xl flex items-center justify-center text-white font-black text-xl shadow-lg shadow-emerald-100 group-hover:scale-105 transition-transform">
+                    {userName.charAt(0)}
+                </div>
+             </div>
           </div>
         </header>
 
-        {/* Content Area */}
-        <ScrollArea className="flex-1">
-          <div className="p-8 max-w-7xl mx-auto w-full pb-20">
+        {/* Dynamic Content Area */}
+        <main className="flex-1 overflow-y-auto custom-scrollbar relative">
+          <div className="p-10 max-w-[1600px] mx-auto pb-32">
             <AnimatePresence mode="wait">
-              <motion.div
-                key={currentView}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.2 }}
+              <motion.div 
+                key={currentView} 
+                initial={{ opacity: 0, y: 20 }} 
+                animate={{ opacity: 1, y: 0 }} 
+                exit={{ opacity: 0, y: -20 }}
+                transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
               >
                 {renderContent()}
               </motion.div>
             </AnimatePresence>
           </div>
-        </ScrollArea>
-      </main>
+        </main>
+      </div>
 
-      {/* Action Dialogs */}
-      <Dialog open={activeAction !== 'none' && !!selectedPatient} onOpenChange={(open) => !open && closeActionForm()}>
-        <DialogContent className="max-w-2xl rounded-3xl border-none shadow-2xl p-0 overflow-hidden">
-          <div className={`p-8 text-white relative ${
-            activeAction === 'visit' ? 'bg-rose-500' : 
-            activeAction === 'immunization' ? 'bg-emerald-600' :
-            activeAction === 'growth' ? 'bg-blue-500' : 'bg-amber-500'
-          }`}>
-            <h3 className="text-2xl font-black mb-1">
-              {activeAction === 'visit' ? 'Catat Kunjungan' : 
-               activeAction === 'immunization' ? 'Catat Imunisasi' :
-               activeAction === 'growth' ? 'Ukur Pertumbuhan' : 'Beri Vitamin'}
+      {/* Profile Dialog */}
+      <Dialog open={isProfileOpen} onOpenChange={setIsProfileOpen}>
+        <DialogContent className="max-w-md rounded-[3rem] p-0 overflow-hidden border-none shadow-2xl">
+           <div className="bg-emerald-600 p-12 text-white text-center relative">
+              <div className="w-24 h-24 bg-white/20 rounded-full mx-auto mb-6 flex items-center justify-center text-4xl font-black border-4 border-white/30 backdrop-blur-md">
+                 {userName.charAt(0)}
+              </div>
+              <h3 className="text-2xl font-black">{userName}</h3>
+              <p className="text-emerald-100 font-bold uppercase text-[10px] tracking-widest mt-2">{userRole.replace('_', ' ')}</p>
+           </div>
+           <div className="p-10 space-y-6">
+              <div className="space-y-4">
+                 <ProfileItem label="Nama Lengkap" value={userName} icon={User} />
+                 <ProfileItem label="Peran Sistem" value={userRole.replace('_', ' ').toUpperCase()} icon={ShieldCheck} />
+                 <ProfileItem label="Tanggal Bergabung" value={format(new Date(), 'dd MMMM yyyy', { locale: id })} icon={Activity} />
+              </div>
+              <Separator className="bg-emerald-50" />
+              <div className="flex gap-3">
+                 <Button className="flex-1 rounded-2xl bg-emerald-600 hover:bg-emerald-700 h-12 font-bold" onClick={() => setIsProfileOpen(false)}>Kembali</Button>
+                 <Button variant="outline" className="flex-1 rounded-2xl border-emerald-100 h-12 font-bold text-red-500 hover:bg-red-50" onClick={handleLogout}>Keluar</Button>
+              </div>
+           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Growth Action Dialog */}
+      <Dialog open={activeAction === 'growth'} onOpenChange={() => setActiveAction('none')}>
+        <DialogContent className="max-w-2xl rounded-[3rem] p-0 overflow-hidden border-none shadow-2xl">
+           <div className="bg-emerald-600 p-10 text-white relative">
+              <TrendingUp className="absolute top-10 right-10 w-20 h-20 opacity-10" />
+              <h3 className="text-2xl font-black">Input Pengukuran KIA</h3>
+              <p className="text-emerald-100 text-sm font-bold tracking-widest uppercase mt-1">Sistem Pendukung Keputusan Gizi</p>
+           </div>
+           <div className="p-10">
+              {selectedPatient && <GrowthForm patient={selectedPatient} onSuccess={() => { refreshData(); setActiveAction('none'); }} onCancel={() => setActiveAction('none')} />}
+           </div>
+        </DialogContent>
+      </Dialog>
+
+      <AddPatientDialog isOpen={isAddingPatient} onOpenChange={setIsAddingPatient} onRefresh={refreshData} />
+      <AddPatientDialog isOpen={isEditingPatient} onOpenChange={setIsEditingPatient} onRefresh={refreshData} initialData={selectedPatient} isEdit />
+    </div>
+  );
+}
+
+// --- Dashboard Component ---
+
+function DashboardView({ stats, role, onAddPatient, onInputGrowth, onMealPlan }: any) {
+  if (!stats) return <div className="p-20 text-center text-emerald-300 animate-pulse font-black uppercase tracking-widest">Sinkronisasi Data...</div>;
+
+  return (
+    <div className="space-y-10">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+        <StatCard title="Total Pasien" value={stats.total_pasien} icon={Users} color="bg-emerald-600" />
+        <StatCard title="Ibu Hamil" value={stats.total_ibu_hamil} icon={HeartPulse} color="bg-rose-500" />
+        <StatCard title="Balita & Bayi" value={stats.total_balita + stats.total_bayi} icon={Activity} color="bg-blue-500" />
+        <StatCard title="Status Stunting" value={stats.stunting_count} icon={TrendingUp} color="bg-amber-500" />
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
+        <Card className="lg:col-span-2 border-none shadow-xl shadow-green-900/5 overflow-hidden rounded-[3rem] bg-white">
+          <CardHeader className="p-8 border-b border-emerald-50">
+            <div className="flex justify-between items-start">
+               <div>
+                  <CardTitle className="text-xl font-black flex items-center gap-3 text-emerald-950">
+                    <Globe className="w-6 h-6 text-emerald-600" />
+                    Monitoring Pertumbuhan Global
+                  </CardTitle>
+                  <CardDescription className="text-emerald-600/60 font-medium">Dataset WHO 2026 vs Rata-rata Pertumbuhan Lokal</CardDescription>
+               </div>
+               <Badge className="bg-emerald-50 text-emerald-700 border-emerald-100 font-black px-4 py-1 uppercase text-[10px]">Statistik WHO</Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="p-10">
+             <div className="h-[400px] w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                   <LineChart data={WHO_GLOBAL_AVERAGES}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                      <XAxis dataKey="month" tick={{fontSize: 12, fontWeight: 700}} axisLine={false} tickLine={false} />
+                      <YAxis tick={{fontSize: 12, fontWeight: 700}} axisLine={false} tickLine={false} />
+                      <RechartsTooltip 
+                        contentStyle={{ borderRadius: '24px', border: 'none', boxShadow: '0 20px 50px rgba(0,0,0,0.1)', padding: '20px' }}
+                      />
+                      <Legend verticalAlign="top" height={36}/>
+                      <Line type="monotone" dataKey="weight" name="Standar Global WHO" stroke="#10b981" strokeWidth={5} dot={{ r: 6, strokeWidth: 3, stroke: '#fff', fill: '#10b981' }} />
+                      <Line type="monotone" dataKey={() => 8.5} name="Rata-rata Lokal" stroke="#f43f5e" strokeWidth={3} strokeDasharray="8 8" />
+                   </LineChart>
+                </ResponsiveContainer>
+             </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-none shadow-xl shadow-green-900/5 rounded-[3rem] bg-white flex flex-col">
+           <CardHeader className="p-8 border-b border-emerald-50">
+              <CardTitle className="text-xl font-black flex items-center gap-3 text-emerald-950">
+                 <Newspaper className="w-6 h-6 text-blue-600" />
+                 Berita Kesehatan
+              </CardTitle>
+           </CardHeader>
+           <CardContent className="p-0 flex-1 overflow-hidden">
+              <ScrollArea className="h-[480px] p-8">
+                 <div className="space-y-8">
+                    <NewsItem title="Pembaruan Protokol Imunisasi Nasional Tahun 2026" source="Kemenkes RI" time="2 Jam" category="Lokal" />
+                    <NewsItem title="Laporan WHO: Tren Penurunan Angka Stunting Global" source="Reuters Health" time="5 Jam" category="Global" />
+                    <NewsItem title="Strategi Optimalisasi Nutrisi pada 1000 Hari Pertama Kehidupan" source="IDAI" time="1 Hari" category="Edukasi" />
+                    <NewsItem title="Inovasi Alat Pendeteksi Dini Anemia pada Ibu Hamil" source="Tech Health" time="2 Hari" category="Global" />
+                 </div>
+              </ScrollArea>
+           </CardContent>
+        </Card>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 pb-10">
+         <div className="lg:col-span-2 space-y-6">
+            <h3 className="text-2xl font-black text-emerald-950 flex items-center gap-3">
+               <BookOpen className="w-7 h-7 text-emerald-600" />
+               Edukasi & Sosialisasi
             </h3>
-            <p className="text-white/80 text-xs font-bold uppercase tracking-widest">
-              Pasien: {selectedPatient?.nama} ({selectedPatient?.no_rm})
-            </p>
-          </div>
-          <div className="p-8">
-            {activeAction === 'visit' && selectedPatient && (
-              <VisitForm patient={selectedPatient} onSuccess={closeActionForm} onCancel={closeActionForm} />
-            )}
-            {activeAction === 'immunization' && selectedPatient && (
-              <ImmunizationForm patient={selectedPatient} onSuccess={closeActionForm} onCancel={closeActionForm} />
-            )}
-            {activeAction === 'growth' && selectedPatient && (
-              <GrowthForm patient={selectedPatient} onSuccess={closeActionForm} onCancel={closeActionForm} />
-            )}
-            {activeAction === 'vitamin' && selectedPatient && (
-              <VitaminForm patient={selectedPatient} onSuccess={closeActionForm} onCancel={closeActionForm} />
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+               <EducationCard title="Nutrisi Ibu Menyusui" desc="Panduan asupan kalori dan mikronutrisi selama masa menyusui eksklusif." img="https://images.unsplash.com/photo-1515377905703-c4788e51af15?w=400&q=80" />
+               <EducationCard title="Mengenal Gejala Stunting" desc="Cara praktis memantau keterlambatan pertumbuhan fisik dan kognitif anak." img="https://images.unsplash.com/photo-1502086223501-7ea2443915b1?w=400&q=80" />
+            </div>
+         </div>
 
-      {/* Patient Picker Dialog */}
-      <Dialog open={isPatientPickerOpen} onOpenChange={setIsPatientPickerOpen}>
-        <DialogContent className="max-w-md rounded-3xl border-none shadow-2xl p-0 overflow-hidden">
-          <div className="bg-emerald-600 p-8 text-white">
-            <h3 className="text-xl font-black mb-1">Pilih Pasien</h3>
-            <p className="text-emerald-100 text-[10px] font-bold uppercase tracking-widest">Cari data pasien terlebih dahulu</p>
-          </div>
-          <div className="p-6">
-            <PatientPicker onSelect={handlePatientSelected} onCancel={() => setIsPatientPickerOpen(false)} />
-          </div>
-        </DialogContent>
-      </Dialog>
+         <Card className="border-none shadow-xl shadow-green-900/5 rounded-[3rem] bg-white p-2">
+            <CardHeader className="p-8 pb-4">
+               <CardTitle className="text-xl font-black text-emerald-950">Aksi Cepat</CardTitle>
+            </CardHeader>
+            <CardContent className="p-6 space-y-3">
+               {role !== 'orang_tua' && <QuickAction icon={UserPlus} label="Daftar Pasien Baru" color="text-blue-600" onClick={onAddPatient} />}
+               {role !== 'orang_tua' && <QuickAction icon={TrendingUp} label="Input Data Ukur" color="text-emerald-600" onClick={onInputGrowth} />}
+               <QuickAction icon={Utensils} label="Buat Rencana Makan" color="text-orange-600" onClick={onMealPlan} />
+               {role === 'admin' && <QuickAction icon={Download} label="Ekspor Laporan" color="text-rose-600" onClick={() => toast.success("Menyiapkan dokumen...")} />}
+            </CardContent>
+         </Card>
+      </div>
     </div>
   );
 }
 
-function PatientPicker({ onSelect, onCancel }: { onSelect: (p: Patient) => void, onCancel: () => void }) {
-  const [patients] = useState<Patient[]>(DatabaseService.getPatients());
+// --- CRUD & Sub-components ---
+
+function PatientsView({ role, onRefresh, onAdd, onEdit, onDelete }: any) {
+  const [patients, setPatients] = useState<Patient[]>([]);
   const [search, setSearch] = useState('');
-  
-  const filtered = patients.filter(p => 
-    p.nama.toLowerCase().includes(search.toLowerCase()) || 
-    p.no_rm.toLowerCase().includes(search.toLowerCase())
-  );
+  const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
+
+  useEffect(() => { setPatients(DatabaseService.getPatients()); }, [onRefresh]);
+
+  const filtered = patients.filter(p => p.nama.toLowerCase().includes(search.toLowerCase()) || p.no_rm.toLowerCase().includes(search.toLowerCase()));
+
+  if (selectedPatient) {
+     return (
+       <div className="space-y-10">
+          <Button variant="ghost" onClick={() => setSelectedPatient(null)} className="font-black text-emerald-600 uppercase text-[10px] tracking-widest hover:bg-emerald-50 rounded-2xl px-6 py-2 transition-all"><ChevronLeft className="w-4 h-4 mr-2"/> Kembali ke Database</Button>
+          <PatientDetailView patient={selectedPatient} />
+       </div>
+     );
+  }
 
   return (
-    <div className="space-y-4">
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-        <Input 
-          placeholder="Cari nama atau No. RM..." 
-          value={search} 
-          onChange={e => setSearch(e.target.value)}
-          className="pl-10 rounded-xl"
-          autoFocus
-        />
-      </div>
-      <ScrollArea className="h-[300px] border rounded-xl p-2">
-        <div className="space-y-1">
-          {filtered.length === 0 ? (
-            <p className="text-center py-8 text-sm text-gray-400">Pasien tidak ditemukan</p>
-          ) : (
-            filtered.map(p => (
-              <button
-                key={p.id}
-                onClick={() => onSelect(p)}
-                className="w-full text-left p-3 hover:bg-emerald-50 rounded-lg transition-colors group"
-              >
-                <p className="font-bold text-sm text-gray-900 group-hover:text-emerald-700">{p.nama}</p>
-                <p className="text-[10px] font-mono text-emerald-600">{p.no_rm} • {p.jenis_pasien === 'ibu_hamil' ? 'Ibu Hamil' : 'Anak'}</p>
-              </button>
-            ))
-          )}
-        </div>
-      </ScrollArea>
-      <div className="flex gap-2">
-        <Button variant="ghost" onClick={onCancel} className="flex-1 rounded-xl">Batal</Button>
-      </div>
-    </div>
-  );
-}
-
-// --- Sub-components (View Logic) ---
-
-function DashboardView({ stats, isAdmin, onAction }: { stats: DashboardStats, isAdmin: boolean, onAction: (type: ActionType) => void }) {
-  return (
-    <div className="space-y-8">
-      {/* Stat Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard 
-          title="Total Pasien" 
-          value={stats.total_pasien} 
-          icon={Users} 
-          color="bg-emerald-600"
-          subtitle={`${stats.total_ibu_hamil} Ibu Hamil, ${stats.total_balita} Anak`}
-        />
-        <StatCard 
-          title="Ibu Hamil" 
-          value={stats.total_ibu_hamil} 
-          icon={Heart} 
-          color="bg-rose-500"
-          subtitle="Pasien Aktif"
-        />
-        <StatCard 
-          title="Balita & Bayi" 
-          value={stats.total_balita + stats.total_bayi} 
-          icon={Baby} 
-          color="bg-blue-500"
-          subtitle={`${stats.total_balita} Balita, ${stats.total_bayi} Bayi`}
-        />
-        <StatCard 
-          title="Kunjungan" 
-          value={stats.kunjungan_hari_ini} 
-          icon={Stethoscope} 
-          color="bg-amber-500"
-          subtitle={`${stats.kunjungan_bulan_ini} Kunjungan Bulan Ini`}
-        />
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <Card className="lg:col-span-2 border-none shadow-xl shadow-green-900/5 overflow-hidden">
-          <CardHeader className="bg-white border-b border-green-50">
-            <CardTitle className="text-lg flex items-center gap-2 text-emerald-900">
-              <Activity className="w-5 h-5 text-emerald-600" />
-              Aktivitas Imunisasi
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-8">
-            <div className="flex items-center justify-between p-6 bg-emerald-50 rounded-3xl border border-emerald-100 relative overflow-hidden group">
-              <div className="absolute -right-4 -bottom-4 opacity-5 group-hover:scale-110 transition-transform">
-                <Syringe className="w-32 h-32" />
-              </div>
-              <div className="relative z-10">
-                <p className="text-5xl font-black text-emerald-700">{stats.imunisasi_bulan_ini}</p>
-                <p className="text-sm font-bold text-emerald-600/70 mt-2 uppercase tracking-wide">Imunisasi Diberikan Bulan Ini</p>
-                <Button className="mt-6 bg-emerald-600 hover:bg-emerald-700 rounded-xl px-6">Lihat Laporan Lengkap</Button>
-              </div>
-              <div className="w-24 h-24 bg-white rounded-2xl flex items-center justify-center shadow-xl shadow-emerald-900/5 hidden sm:flex">
-                <Syringe className="w-12 h-12 text-emerald-500" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-none shadow-xl shadow-green-900/5">
-          <CardHeader className="bg-white border-b border-green-50">
-            <CardTitle className="text-lg flex items-center gap-2 text-emerald-900">
-              <ClipboardPlus className="w-5 h-5 text-emerald-600" />
-              Aksi Cepat
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-6">
-            <div className="grid grid-cols-1 gap-3">
-              <QuickActionButton icon={Plus} label="Pasien Baru" disabled={!isAdmin} color="text-blue-600" />
-              <QuickActionButton icon={Stethoscope} onClick={() => onAction('visit')} label="Catat Kunjungan" disabled={!isAdmin} color="text-rose-600" />
-              <QuickActionButton icon={Syringe} onClick={() => onAction('immunization')} label="Data Imunisasi" disabled={!isAdmin} color="text-emerald-600" />
-              <QuickActionButton icon={Pill} onClick={() => onAction('vitamin')} label="Beri Vitamin" disabled={!isAdmin} color="text-amber-600" />
-            </div>
-            {!isAdmin && (
-              <div className="mt-6 p-4 bg-amber-50 rounded-xl border border-amber-100">
-                <p className="text-[11px] text-amber-700 font-medium leading-relaxed">
-                   Akses terbatas untuk akun masyarakat. Silakan hubungi admin posyandu untuk pendaftaran data baru.
-                </p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-}
-
-function StatCard({ title, value, icon: Icon, color, subtitle }: any) {
-  return (
-    <Card className="border-none shadow-xl shadow-green-900/5 overflow-hidden relative group transition-all hover:-translate-y-2 health-card">
-      <div className={`absolute top-0 right-0 w-32 h-32 -mr-12 -mt-12 rounded-full opacity-10 group-hover:scale-125 transition-transform duration-500 ${color}`} />
-      <CardContent className="p-6">
-        <div className="flex items-center gap-4 mb-4">
-          <div className={`w-12 h-12 ${color} rounded-2xl flex items-center justify-center shadow-lg shadow-current/20 group-hover:rotate-12 transition-transform`}>
-            <Icon className="w-6 h-6 text-white" />
+    <div className="space-y-10">
+       <div className="flex flex-col md:flex-row gap-6 items-center justify-between">
+          <div className="relative w-full max-w-xl">
+             <Search className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-emerald-200" />
+             <Input placeholder="Cari berdasarkan nama atau No. RM..." className="pl-14 rounded-[2rem] h-16 border-emerald-50 bg-white shadow-xl shadow-emerald-900/5 text-lg font-bold text-emerald-950 focus-visible:ring-emerald-500 transition-all" value={search} onChange={e => setSearch(e.target.value)} />
           </div>
-          <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.2em]">{title}</p>
+          {role !== 'orang_tua' && (
+            <Button onClick={onAdd} className="h-16 px-10 bg-emerald-600 hover:bg-emerald-700 rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-2xl shadow-emerald-200 transition-all active:scale-95">
+               <Plus className="w-5 h-5 mr-3" />
+               Registrasi KIA Baru
+            </Button>
+          )}
+       </div>
+
+       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+          {filtered.map(p => (
+             <Card key={p.id} className="border-none shadow-xl shadow-green-900/5 rounded-[3rem] overflow-hidden hover:-translate-y-2 transition-all duration-500 bg-white group border border-transparent hover:border-emerald-100">
+                <div className={`h-2.5 w-full ${p.jenis_pasien.includes('hamil') ? 'bg-rose-500' : 'bg-blue-500'}`} />
+                <CardContent className="p-10">
+                   <div className="flex justify-between items-start mb-6">
+                      <div className="w-16 h-16 bg-emerald-50 rounded-3xl flex items-center justify-center font-black text-emerald-600 text-xl group-hover:scale-110 transition-transform shadow-sm">
+                         {p.nama.charAt(0)}
+                      </div>
+                      <Badge variant="secondary" className="bg-emerald-50 text-emerald-700 border-none font-black uppercase text-[9px] tracking-widest px-4 py-1.5 rounded-full">{p.jenis_pasien.replace('_', ' ')}</Badge>
+                   </div>
+                   <h4 className="font-black text-emerald-950 text-xl mb-1 line-clamp-1">{p.nama}</h4>
+                   <p className="text-[11px] font-bold text-emerald-600 tracking-wider uppercase mb-6">{p.no_rm}</p>
+                   
+                   <div className="space-y-3 mb-10 text-gray-500 font-medium text-xs">
+                      <div className="flex items-center gap-3"><MapIcon className="w-4 h-4 text-emerald-500 opacity-50" /> {p.alamat}</div>
+                      <div className="flex items-center gap-3"><Heart className="w-4 h-4 text-rose-500 opacity-50" /> {p.riwayat_penyakit?.[0] || 'Riwayat Kesehatan Bersih'}</div>
+                   </div>
+
+                   <div className="flex gap-3">
+                      <Button onClick={() => setSelectedPatient(p)} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white shadow-lg shadow-emerald-100 border-none rounded-2xl font-black uppercase text-[10px] tracking-widest h-12 transition-all active:scale-95">Buka Rekam Medis</Button>
+                      {role !== 'orang_tua' && (
+                        <div className="flex gap-2">
+                           <Button variant="outline" className="rounded-2xl border-emerald-100 h-12 px-4 hover:bg-emerald-50 transition-colors" onClick={() => onEdit(p)}><Edit2 className="w-4 h-4 text-emerald-600" /></Button>
+                           <Button variant="outline" className="rounded-2xl border-rose-100 h-12 px-4 hover:bg-rose-50 text-rose-500" onClick={() => onDelete(p.id)}><Trash2 className="w-4 h-4" /></Button>
+                        </div>
+                      )}
+                   </div>
+                </CardContent>
+             </Card>
+          ))}
+       </div>
+    </div>
+  );
+}
+
+function GrowthMonitoringView({ patients, onInput, onEdit, onDelete, refreshData }: any) {
+  const records = DatabaseService.getGrowthRecords();
+  const [selectedPatientId, setSelectedPatientId] = useState<string>('');
+  const [isInputOpen, setIsInputOpen] = useState(false);
+
+  const handleInputOpen = () => {
+    if (selectedPatientId) {
+      setIsInputOpen(true);
+    } else {
+      toast.error("Silakan pilih pasien terlebih dahulu");
+    }
+  };
+
+  return (
+    <div className="space-y-10">
+       <Card className="border-none shadow-2xl shadow-green-900/5 rounded-[3rem] overflow-hidden bg-white">
+          <CardHeader className="p-10 border-b border-emerald-50 flex flex-col md:flex-row justify-between items-start md:items-center bg-white gap-6">
+             <div>
+                <CardTitle className="text-2xl font-black text-emerald-950">Pemantauan Gizi (DSS)</CardTitle>
+                <CardDescription className="text-emerald-600 font-bold uppercase text-[10px] mt-1 tracking-widest">Sistem Pendukung Keputusan Berdasarkan Standar WHO</CardDescription>
+             </div>
+             <div className="flex gap-4 w-full md:w-auto">
+                <select 
+                  className="h-14 bg-emerald-50 border-none rounded-2xl px-6 font-bold text-emerald-950 outline-none flex-1 md:w-64"
+                  value={selectedPatientId}
+                  onChange={(e) => setSelectedPatientId(e.target.value)}
+                >
+                  <option value="">Pilih Pasien...</option>
+                  {patients.map((p: Patient) => (
+                    <option key={p.id} value={p.id}>{p.nama} ({p.no_rm})</option>
+                  ))}
+                </select>
+                <Button onClick={handleInputOpen} className="bg-emerald-600 hover:bg-emerald-700 rounded-2xl px-8 h-14 font-black uppercase text-[10px] tracking-widest shadow-xl shadow-emerald-100 active:scale-95 transition-all">
+                   <Plus className="w-5 h-5 mr-3" />
+                   Tambah Pengukuran
+                </Button>
+             </div>
+          </CardHeader>
+          <div className="overflow-x-auto">
+             <table className="w-full">
+                <thead className="bg-emerald-50/30 border-b border-emerald-50 text-left">
+                   <tr>
+                      <th className="p-8 text-[11px] font-black uppercase tracking-widest text-emerald-800">Identitas Pasien</th>
+                      <th className="p-8 text-[11px] font-black uppercase tracking-widest text-emerald-800">Tgl. Ukur</th>
+                      <th className="p-8 text-[11px] font-black uppercase tracking-widest text-emerald-800">BB / TB</th>
+                      <th className="p-8 text-[11px] font-black uppercase tracking-widest text-emerald-800">Status Gizi (WHO)</th>
+                      <th className="p-8 text-[11px] font-black uppercase tracking-widest text-emerald-800 text-center">Aksi</th>
+                   </tr>
+                </thead>
+                <tbody className="divide-y divide-emerald-50/50">
+                   {records.map(r => (
+                      <tr key={r.id} className="hover:bg-emerald-50/10 transition-colors">
+                         <td className="p-8">
+                            <div className="flex items-center gap-4">
+                               <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center border border-emerald-100 shadow-sm font-black text-emerald-600">
+                                  {DatabaseService.getPatientById(r.patient_id)?.nama.charAt(0)}
+                               </div>
+                               <span className="font-bold text-emerald-950">{DatabaseService.getPatientById(r.patient_id)?.nama}</span>
+                            </div>
+                         </td>
+                         <td className="p-8 text-sm font-bold text-gray-400">{format(new Date(r.tanggal), 'dd MMM yyyy', { locale: id })}</td>
+                         <td className="p-8 text-sm font-black text-emerald-700">{r.berat_badan} kg / {r.tinggi_badan} cm</td>
+                         <td className="p-8">
+                            <Badge className={cn(
+                               "border-none font-black uppercase text-[10px] tracking-widest px-4 py-1.5 rounded-full shadow-sm",
+                               r.status_gizi?.includes('Baik') || r.status_gizi?.includes('Normal') ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-600'
+                            )}>
+                               {r.status_gizi}
+                            </Badge>
+                         </td>
+                         <td className="p-8">
+                            <div className="flex justify-center gap-2">
+                               <Button variant="ghost" size="icon" className="w-10 h-10 rounded-xl hover:bg-emerald-50 transition-colors" onClick={() => onEdit(r)}><Edit2 className="w-4 h-4 text-emerald-600" /></Button>
+                               <Button variant="ghost" size="icon" className="w-10 h-10 rounded-xl text-rose-500 hover:bg-rose-50 transition-colors" onClick={() => onDelete(r.id)}><Trash2 className="w-4 h-4" /></Button>
+                            </div>
+                         </td>
+                      </tr>
+                   ))}
+                </tbody>
+             </table>
+          </div>
+       </Card>
+
+       <Dialog open={isInputOpen} onOpenChange={setIsInputOpen}>
+          <DialogContent className="max-w-2xl rounded-[3rem] p-0 overflow-hidden border-none shadow-2xl">
+            <div className="bg-emerald-600 p-10 text-white relative">
+                <TrendingUp className="absolute top-10 right-10 w-20 h-20 opacity-10" />
+                <h3 className="text-2xl font-black">Input Pengukuran KIA</h3>
+                <p className="text-emerald-100 text-sm font-bold tracking-widest uppercase mt-1">Sistem Pendukung Keputusan Gizi</p>
+            </div>
+            <div className="p-10">
+                {selectedPatientId && (
+                  <GrowthForm 
+                    patient={DatabaseService.getPatientById(selectedPatientId)!} 
+                    onSuccess={() => { onInput(); setIsInputOpen(false); refreshData(); }} 
+                    onCancel={() => setIsInputOpen(false)} 
+                  />
+                )}
+            </div>
+          </DialogContent>
+       </Dialog>
+    </div>
+  );
+}
+
+function AddPatientDialog({ isOpen, onOpenChange, onRefresh, initialData, isEdit }: any) {
+  const [formData, setFormData] = useState({ 
+    nama: '', nik: '', jenis_pasien: 'balita' as any, alamat: '' 
+  });
+
+  useEffect(() => {
+    if (initialData && isEdit) {
+      setFormData({
+        nama: initialData.nama || '',
+        nik: initialData.nik || '',
+        jenis_pasien: initialData.jenis_pasien || 'balita',
+        alamat: initialData.alamat || ''
+      });
+    } else {
+      setFormData({ nama: '', nik: '', jenis_pasien: 'balita', alamat: '' });
+    }
+  }, [initialData, isEdit, isOpen]);
+
+  const handleSubmit = (e: any) => {
+    e.preventDefault();
+    if (isEdit && initialData) {
+      DatabaseService.savePatient({ ...initialData, ...formData, updated_at: new Date().toISOString() });
+      toast.success("Data pasien berhasil diperbarui");
+    } else {
+      const newId = Math.random().toString(36).substring(2, 9);
+      DatabaseService.savePatient({ 
+        ...formData, id: newId, 
+        no_rm: DatabaseService.generateNoRM(formData.jenis_pasien),
+        is_active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() 
+      } as any);
+      toast.success("Pasien berhasil didaftarkan");
+    }
+    onRefresh();
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-xl rounded-[3rem] p-0 overflow-hidden border-none shadow-2xl">
+        <div className="bg-emerald-600 p-12 text-white relative">
+           <UserPlus className="absolute top-10 right-10 w-20 h-20 opacity-10" />
+           <h3 className="text-2xl font-black tracking-tight">{isEdit ? 'Ubah Informasi KIA' : 'Registrasi KIA Baru'}</h3>
+           <p className="text-emerald-100 font-bold uppercase text-[10px] mt-1 tracking-widest opacity-70">Manajemen Database KIA Posyandu</p>
         </div>
-        <div className="space-y-1">
-          <p className="text-4xl font-black text-emerald-950 tracking-tight">{value}</p>
-          {subtitle && <p className="text-xs text-emerald-600/60 font-bold">{subtitle}</p>}
+        <form onSubmit={handleSubmit} className="p-12 space-y-6">
+          <div className="grid grid-cols-1 gap-6">
+             <div className="space-y-2"><Label className="text-[10px] font-black uppercase text-emerald-800 tracking-widest ml-1">Nama Lengkap</Label><Input required className="h-14 rounded-2xl border-emerald-50 bg-emerald-50/30 font-bold px-6" value={formData.nama} onChange={e => setFormData({...formData, nama: e.target.value})} /></div>
+             <div className="space-y-2"><Label className="text-[10px] font-black uppercase text-emerald-800 tracking-widest ml-1">NIK (16 Digit)</Label><Input required maxLength={16} className="h-14 rounded-2xl border-emerald-50 bg-emerald-50/30 font-bold px-6" value={formData.nik} onChange={e => setFormData({...formData, nik: e.target.value})} /></div>
+             <div className="space-y-2">
+               <Label className="text-[10px] font-black uppercase text-emerald-800 tracking-widest ml-1">Kategori Pasien</Label>
+               <select className="w-full h-14 border border-emerald-50 bg-emerald-50/30 rounded-2xl px-6 font-bold text-emerald-950 appearance-none outline-none" value={formData.jenis_pasien} onChange={e => setFormData({...formData, jenis_pasien: e.target.value})}>
+                 <option value="balita">Balita</option>
+                 <option value="ibu_hamil">Ibu Hamil</option>
+                 <option value="ibu_menyusui">Ibu Menyusui</option>
+               </select>
+             </div>
+             <div className="space-y-2"><Label className="text-[10px] font-black uppercase text-emerald-800 tracking-widest ml-1">Alamat Domisili</Label><Input required className="h-14 rounded-2xl border-emerald-50 bg-emerald-50/30 font-bold px-6" value={formData.alamat} onChange={e => setFormData({...formData, alamat: e.target.value})} /></div>
+          </div>
+          <div className="pt-8 flex gap-4">
+             <Button type="submit" className="flex-1 h-16 bg-emerald-600 hover:bg-emerald-700 rounded-[2rem] font-black uppercase text-xs tracking-widest shadow-xl shadow-emerald-100 transition-all active:scale-95">{isEdit ? 'Simpan Perubahan' : 'Daftarkan Pasien'}</Button>
+             <Button type="button" variant="ghost" className="h-16 px-10 rounded-[2rem] font-black uppercase text-xs tracking-widest" onClick={() => onOpenChange(false)}>Batal</Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// --- Common UI Components ---
+
+function ProfileItem({ label, value, icon: Icon }: any) {
+  return (
+    <div className="flex items-center gap-4 p-4 rounded-2xl bg-emerald-50/30 border border-emerald-50">
+       <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-emerald-600 shadow-sm"><Icon className="w-5 h-5" /></div>
+       <div>
+          <p className="text-[10px] font-black text-emerald-800/40 uppercase tracking-widest leading-none mb-1">{label}</p>
+          <p className="font-bold text-emerald-950">{value}</p>
+       </div>
+    </div>
+  );
+}
+
+function NewsItem({ title, source, time, category }: any) {
+   return (
+      <div className="group cursor-pointer">
+         <div className="flex justify-between items-center mb-2">
+            <Badge variant="outline" className="text-[10px] font-black uppercase px-3 py-0.5 border-emerald-100 text-emerald-600 rounded-full">{category}</Badge>
+            <span className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">{time} Lalu</span>
+         </div>
+         <h4 className="text-base font-bold text-gray-800 group-hover:text-emerald-600 transition-colors leading-snug line-clamp-2">{title}</h4>
+         <p className="text-[11px] text-gray-400 font-bold mt-2 flex items-center gap-2">
+            <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full" /> {source}
+         </p>
+      </div>
+   );
+}
+
+function StatCard({ title, value, icon: Icon, color }: any) {
+  return (
+    <Card className="border-none shadow-2xl shadow-emerald-900/5 rounded-[2.5rem] bg-white overflow-hidden group hover:-translate-y-1 transition-all duration-500">
+      <CardContent className="p-8 flex items-center gap-8">
+        <div className={cn("w-16 h-16 rounded-[1.75rem] flex items-center justify-center text-white shadow-2xl transition-all duration-500 group-hover:scale-110", color)}>
+           <Icon className="w-8 h-8" />
+        </div>
+        <div>
+           <p className="text-[11px] font-black text-emerald-600/40 uppercase tracking-[0.15em] mb-1">{title}</p>
+           <p className="text-4xl font-black text-emerald-950 tracking-tighter leading-none">{value}</p>
         </div>
       </CardContent>
     </Card>
   );
 }
 
-function QuickActionButton({ icon: Icon, label, disabled, color, onClick }: any) {
+function QuickAction({ icon: Icon, label, color, onClick }: any) {
   return (
-    <Button 
-      variant="outline" 
-      disabled={disabled}
-      onClick={onClick}
-      className={`justify-start h-14 rounded-2xl border-green-50 bg-white hover:bg-emerald-50 hover:border-emerald-200 transition-all group w-full ${disabled && 'opacity-50'}`}
-    >
-      <div className={`w-10 h-10 rounded-xl bg-gray-50 flex items-center justify-center mr-3 group-hover:bg-white transition-colors`}>
-        <Icon className={`w-5 h-5 ${color}`} />
-      </div>
-      <span className="font-bold text-gray-700">{label}</span>
+    <Button variant="ghost" className="w-full justify-start h-16 rounded-3xl hover:bg-emerald-50 group border border-transparent hover:border-emerald-100 transition-all duration-300" onClick={onClick}>
+       <div className="w-11 h-11 bg-white rounded-2xl flex items-center justify-center mr-5 transition-all duration-500 group-hover:scale-110 shadow-sm border border-gray-50"><Icon className={cn("w-5 h-5", color)} /></div>
+       <span className="font-black text-emerald-950 uppercase text-[10px] tracking-widest">{label}</span>
     </Button>
   );
 }
 
-function ProfileView({ name, role }: { name: string, role: string }) {
-  const [isEditing, setIsEditing] = useState(false);
-  const [profileName, setProfileName] = useState(name);
-
-  return (
-    <div className="max-w-4xl mx-auto">
-      <Card className="border-none shadow-2xl shadow-green-900/10 rounded-[2rem] overflow-hidden">
-        <div className="h-40 bg-emerald-600 relative">
-          <div className="absolute -bottom-16 left-8">
-            <div className="w-32 h-32 bg-white rounded-3xl p-1 shadow-2xl shadow-emerald-900/20">
-              <div className="w-full h-full bg-emerald-100 rounded-[1.25rem] flex items-center justify-center border-2 border-emerald-50">
-                <User className="w-16 h-16 text-emerald-600" />
-              </div>
-            </div>
-          </div>
-          <div className="absolute bottom-4 right-8">
-             <Badge className="bg-white/20 backdrop-blur-md text-white border-white/30 text-xs px-4 py-1 rounded-full uppercase tracking-widest font-black">
-                {role}
-             </Badge>
-          </div>
-        </div>
-        
-        <CardContent className="pt-20 pb-12 px-12">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-            <div className="space-y-8">
-              <div>
-                <h3 className="text-2xl font-black text-emerald-950 mb-1">{profileName}</h3>
-                <p className="text-emerald-600 font-bold text-sm">Terdaftar sejak 2024</p>
-              </div>
-
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label className="text-[10px] font-black uppercase text-gray-400 tracking-widest">Nama Lengkap</Label>
-                  <Input 
-                    value={profileName} 
-                    onChange={(e) => setProfileName(e.target.value)}
-                    disabled={!isEditing}
-                    className="h-12 border-green-100 rounded-xl focus-visible:ring-emerald-500 bg-green-50/30 font-bold"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label className="text-[10px] font-black uppercase text-gray-400 tracking-widest">Email Terdaftar</Label>
-                  <Input value="user@email.id" disabled className="h-12 bg-gray-50 border-gray-100 rounded-xl" />
-                </div>
-              </div>
-
-              <div className="pt-4">
-                {isEditing ? (
-                  <div className="flex gap-4">
-                    <Button onClick={() => setIsEditing(false)} className="flex-1 bg-emerald-600 hover:bg-emerald-700 rounded-xl h-12 font-bold shadow-lg shadow-emerald-200">
-                      Simpan Data
-                    </Button>
-                    <Button variant="ghost" onClick={() => setIsEditing(false)} className="rounded-xl h-12 px-6">Batal</Button>
-                  </div>
-                ) : (
-                  <Button onClick={() => setIsEditing(true)} variant="outline" className="w-full border-emerald-200 text-emerald-700 hover:bg-emerald-50 rounded-xl h-12 font-bold">
-                    <Edit2 className="w-4 h-4 mr-2" /> Perbarui Profil
-                  </Button>
-                )}
-              </div>
-            </div>
-
-            <div className="bg-emerald-50/50 rounded-3xl p-8 border border-emerald-100">
-              <h4 className="font-black text-emerald-900 mb-6 flex items-center gap-2">
-                <BellDot className="w-5 h-5 text-emerald-500" />
-                Notifikasi Terbaru
-              </h4>
-              <div className="space-y-4">
-                <NotificationItem title="Jadwal Imunisasi" desc="Besok jam 08:00 di Posyandu Melati" type="urgent" />
-                <NotificationItem title="Pesan Admin" desc="Data balita anda telah diperbarui" type="info" />
-              </div>
-            </div>
-          </div>
-        </CardContent>
+function EducationCard({ title, desc, img }: any) {
+   return (
+      <Card className="rounded-[2.5rem] border-none shadow-lg overflow-hidden group hover:shadow-2xl transition-all duration-500 bg-white">
+         <div className="h-48 overflow-hidden relative">
+            <div className="absolute inset-0 bg-emerald-950/20 group-hover:bg-transparent transition-colors z-10" />
+            <img src={img} alt={title} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
+         </div>
+         <CardContent className="p-8">
+            <h4 className="text-lg font-black text-emerald-950 mb-3 leading-tight">{title}</h4>
+            <p className="text-sm text-gray-500 leading-relaxed line-clamp-2 mb-6 font-medium">{desc}</p>
+            <Button variant="ghost" className="w-full justify-between rounded-2xl hover:bg-emerald-50 text-emerald-600 font-black uppercase text-[10px] tracking-widest h-12">
+               Baca Selengkapnya
+               <ExternalLink className="w-4 h-4" />
+            </Button>
+         </CardContent>
       </Card>
-    </div>
-  );
+   );
 }
 
-function NotificationItem({ title, desc, type }: any) {
-  return (
-    <div className="flex gap-4 p-4 bg-white rounded-2xl shadow-sm border border-green-50 group hover:border-emerald-200 transition-colors">
-      <div className={`w-2 h-12 rounded-full ${type === 'urgent' ? 'bg-rose-400' : 'bg-emerald-400'}`} />
-      <div>
-        <h5 className="font-bold text-gray-900 text-sm">{title}</h5>
-        <p className="text-xs text-gray-500 mt-1">{desc}</p>
-      </div>
-    </div>
-  );
-}
-
-function PatientsView({ isAdmin, onRefresh, onAction }: { onRefresh: () => void, isAdmin: boolean, onAction: (type: ActionType, p: Patient) => void }) {
-  const [patients, setPatients] = useState<Patient[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [viewingPatient, setViewingPatient] = useState<Patient | null>(null);
-  const [isAddingPatient, setIsAddingPatient] = useState(false);
-
-  // New patient form state
-  const [newPatient, setNewPatient] = useState({
-    nama: '',
-    nik: '',
-    jenis_pasien: 'balita' as 'ibu_hamil' | 'balita' | 'bayi',
-    alamat: '',
-  });
-
+function MealPlannerMainView({ patients, role, myPatientId }: any) {
+  const [selected, setSelected] = useState<Patient | null>(null);
   useEffect(() => {
-    loadPatients();
-  }, []);
+    if (role === 'orang_tua' && myPatientId) {
+      setSelected(patients.find((p: any) => p.id === myPatientId) || patients[0]);
+    }
+  }, [role, myPatientId, patients]);
 
-  const loadPatients = () => {
-    setPatients(DatabaseService.getPatients());
-  };
-
-  const handleAddPatient = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newPatient.nama || !newPatient.nik) return;
-
-    const newId = (patients.length + 1).toString();
-    const no_rm = DatabaseService.generateNoRM(newPatient.jenis_pasien);
-
-    const patientData: any = {
-      id: newId,
-      no_rm,
-      ...newPatient,
-      is_active: true,
-    };
-
-    DatabaseService.savePatient(patientData);
-    setIsAddingPatient(false);
-    setNewPatient({ nama: '', nik: '', jenis_pasien: 'balita', alamat: '' });
-    loadPatients();
-    onRefresh();
-  };
-
-  const filteredPatients = patients.filter(p => 
-    p.nama.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    p.no_rm.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  if (role === 'orang_tua' && selected) return <MealPlanner patient={selected} />;
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-        <div className="relative flex-1 w-full max-w-lg">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-emerald-300" />
-          <Input
-            placeholder="Cari nama pasien atau nomor RM..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-12 h-14 bg-white border-green-100 rounded-2xl focus-visible:ring-emerald-500 shadow-lg shadow-emerald-900/5 text-emerald-950 font-medium"
-          />
-        </div>
-        {isAdmin && (
-          <Button 
-            onClick={() => setIsAddingPatient(true)}
-            className="w-full md:w-auto h-14 px-8 rounded-2xl bg-emerald-600 hover:bg-emerald-700 shadow-xl shadow-emerald-200 transition-all active:scale-95"
-          >
-            <Plus className="w-5 h-5 mr-2" />
-            Tambah Pasien Baru
-          </Button>
+    <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
+      <Card className="md:col-span-1 rounded-[3rem] shadow-2xl shadow-green-900/5 overflow-hidden border-none bg-white">
+        <CardHeader className="p-8 border-b border-emerald-50 bg-white"><CardTitle className="text-xl font-black text-emerald-950">Pilih Pasien</CardTitle></CardHeader>
+        <ScrollArea className="h-[600px] p-6">
+          <div className="space-y-3">
+            {patients.map((p: any) => (
+              <button key={p.id} onClick={() => setSelected(p)} className={cn(
+                "w-full p-6 rounded-[2rem] text-left transition-all duration-300 relative overflow-hidden group",
+                selected?.id === p.id ? 'bg-emerald-600 text-white shadow-xl shadow-emerald-100 scale-[1.02]' : 'bg-gray-50/50 hover:bg-white border border-transparent hover:border-emerald-50'
+              )}>
+                <div className="relative z-10">
+                   <p className="font-black tracking-tight text-lg leading-none">{p.nama}</p>
+                   <p className={cn("text-[10px] uppercase font-black tracking-widest mt-2", selected?.id === p.id ? 'text-emerald-100' : 'text-emerald-500')}>{p.no_rm}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </ScrollArea>
+      </Card>
+      <div className="md:col-span-2">
+        {selected ? (
+          <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+            <MealPlanner patient={selected} />
+          </motion.div>
+        ) : (
+          <div className="h-full flex flex-col items-center justify-center bg-white rounded-[4rem] border-4 border-dashed border-emerald-50 text-emerald-100 p-20 text-center">
+            <div className="w-32 h-32 bg-emerald-50 rounded-[3rem] flex items-center justify-center mb-8"><Utensils className="w-16 h-16 opacity-30" /></div>
+            <h4 className="text-2xl font-black text-emerald-900/20 uppercase tracking-[0.2em]">Pilih Pasien</h4>
+            <p className="text-sm font-bold text-emerald-600/30 mt-4 max-w-xs uppercase tracking-widest">Silakan pilih pasien dari daftar untuk membuat rencana makan personal.</p>
+          </div>
         )}
       </div>
+    </div>
+  );
+}
 
-      <Card className="border-none shadow-2xl shadow-green-900/5 rounded-[2rem] overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="bg-emerald-50/50 border-b border-green-100 text-left">
-                <th className="p-6 font-black text-emerald-900 text-xs uppercase tracking-widest">Pasien</th>
-                <th className="p-6 font-black text-emerald-900 text-xs uppercase tracking-widest">Kategori</th>
-                <th className="p-6 font-black text-emerald-900 text-xs uppercase tracking-widest text-right">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-green-50">
-              {filteredPatients.map((patient) => (
-                <tr key={patient.id} className="hover:bg-emerald-50/30 transition-colors">
-                  <td className="p-6">
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center font-black text-emerald-700">
-                        {patient.nama.charAt(0)}
-                      </div>
-                      <div>
-                        <p className="font-bold text-gray-900">{patient.nama}</p>
-                        <p className="text-[10px] font-mono text-emerald-600 font-bold">{patient.no_rm}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="p-6">
-                    <Badge className={`bg-white border text-xs px-3 py-1 rounded-full ${
-                      patient.jenis_pasien === 'ibu_hamil' ? 'border-rose-100 text-rose-600' : 'border-blue-100 text-blue-600'
-                    }`}>
-                      {patient.jenis_pasien === 'ibu_hamil' ? 'Ibu Hamil' : 'Anak/Balita'}
-                    </Badge>
-                  </td>
-                  <td className="p-6 text-right">
-                    <div className="flex justify-end gap-2">
-                       <DropdownMenu>
-                         <DropdownMenuTrigger asChild>
-                           <Button variant="ghost" size="icon" className="rounded-xl hover:bg-emerald-100 hover:text-emerald-700">
-                              <Plus className="w-4 h-4" />
-                           </Button>
-                         </DropdownMenuTrigger>
-                         <DropdownMenuContent align="end" className="w-48 rounded-xl">
-                            <DropdownMenuItem onClick={() => onAction('visit', patient)}>Catat Kunjungan</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => onAction('immunization', patient)}>Catat Imunisasi</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => onAction('growth', patient)}>Ukur Balita</DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => onAction('vitamin', patient)}>Beri Vitamin</DropdownMenuItem>
-                         </DropdownMenuContent>
-                       </DropdownMenu>
-                       <Button variant="ghost" size="icon" className="rounded-xl hover:bg-emerald-100 hover:text-emerald-700" onClick={() => setViewingPatient(patient)}>
-                          <Eye className="w-4 h-4" />
-                       </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-      
-      {/* Add Patient Dialog */}
-      <Dialog open={isAddingPatient} onOpenChange={setIsAddingPatient}>
-        <DialogContent className="max-w-md rounded-3xl border-none shadow-2xl p-0 overflow-hidden">
-          <div className="bg-emerald-600 p-8 text-white relative">
-            <UserCircle className="absolute top-4 right-4 w-12 h-12 opacity-20" />
-            <h3 className="text-2xl font-black mb-1">Pasien Baru</h3>
-            <p className="text-emerald-100 text-xs font-bold uppercase tracking-widest">Registrasi Data Posyandu</p>
+function ReportsView({ stats }: any) {
+   return (
+      <div className="space-y-10">
+         <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
+            <ReportItem title="Statistik Pertumbuhan" type="PDF" icon={FileSpreadsheet} color="bg-emerald-50 text-emerald-600" />
+            <ReportItem title="Distribusi Gizi" type="EXCEL" icon={FileText} color="bg-blue-50 text-blue-600" />
+            <ReportItem title="Rekap Database KIA" type="PDF" icon={Download} color="bg-rose-50 text-rose-600" />
+         </div>
+         <Card className="rounded-[4rem] p-16 shadow-2xl shadow-green-900/5 bg-white border-none">
+            <h3 className="text-3xl font-black text-emerald-950 mb-12 tracking-tight uppercase border-l-8 border-emerald-500 pl-8">Summary Laporan Global</h3>
+            <div className="space-y-6">
+               <SummaryRow label="Total Stunting Terdeteksi" value={`${stats?.stunting_count || 0} Anak`} />
+               <SummaryRow label="Total Kunjungan Periode Ini" value={`${stats?.kunjungan_bulan_ini || 0} Kunjungan`} />
+               <SummaryRow label="Efektivitas Program Gizi" value="92.4%" />
+            </div>
+         </Card>
+      </div>
+   );
+}
+
+function SummaryRow({ label, value }: any) {
+  return (
+    <div className="flex justify-between items-center p-8 bg-emerald-50/20 rounded-[2.5rem] border border-emerald-50/50 group hover:bg-white hover:shadow-xl transition-all duration-500">
+       <span className="font-black text-emerald-900/40 uppercase text-xs tracking-widest">{label}</span>
+       <span className="font-black text-emerald-950 text-2xl tracking-tighter">{value}</span>
+    </div>
+  );
+}
+
+function ReportItem({ title, type, icon: Icon, color }: any) {
+  return (
+    <Card className="rounded-[3rem] shadow-2xl shadow-green-900/5 hover:-translate-y-3 transition-all duration-500 cursor-pointer group bg-white border-none overflow-hidden" onClick={() => toast.success(`Mendownload ${title}...`)}>
+       <div className="p-10 space-y-6">
+          <div className={cn("w-16 h-16 rounded-3xl flex items-center justify-center transition-all duration-500 group-hover:rotate-6 shadow-lg", color)}><Icon className="w-8 h-8" /></div>
+          <div>
+             <p className="text-[10px] font-black text-emerald-600/40 uppercase tracking-[0.2em] mb-2">{type} EKSPOR</p>
+             <h4 className="text-lg font-black text-emerald-950 leading-tight">{title}</h4>
           </div>
-          <form onSubmit={handleAddPatient} className="p-8 space-y-5">
-            <div className="space-y-2">
-              <Label className="text-[10px] font-black uppercase text-gray-400">Nama Lengkap</Label>
-              <Input 
-                value={newPatient.nama} 
-                onChange={e => setNewPatient({...newPatient, nama: e.target.value})}
-                required 
-                className="rounded-xl h-12 border-green-100"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-[10px] font-black uppercase text-gray-400">NIK (16 Digit)</Label>
-              <Input 
-                value={newPatient.nik} 
-                onChange={e => setNewPatient({...newPatient, nik: e.target.value})}
-                required 
-                maxLength={16}
-                className="rounded-xl h-12 border-green-100"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-[10px] font-black uppercase text-gray-400">Kategori Pasien</Label>
-              <select 
-                value={newPatient.jenis_pasien}
-                onChange={e => setNewPatient({...newPatient, jenis_pasien: e.target.value as any})}
-                className="w-full h-12 rounded-xl border border-green-100 bg-white px-3 font-bold text-emerald-900"
-              >
-                <option value="balita">Balita</option>
-                <option value="bayi">Bayi</option>
-                <option value="ibu_hamil">Ibu Hamil</option>
-              </select>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-[10px] font-black uppercase text-gray-400">Alamat</Label>
-              <Input 
-                value={newPatient.alamat} 
-                onChange={e => setNewPatient({...newPatient, alamat: e.target.value})}
-                required 
-                className="rounded-xl h-12 border-green-100"
-              />
-            </div>
-            <div className="pt-4 flex gap-3">
-              <Button type="submit" className="flex-1 h-12 bg-emerald-600 hover:bg-emerald-700 rounded-xl font-bold">Simpan Pasien</Button>
-              <Button type="button" variant="ghost" onClick={() => setIsAddingPatient(false)} className="rounded-xl">Batal</Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
-      
-      {/* Patient Detail Dialog */}
-      <Dialog open={!!viewingPatient} onOpenChange={() => setViewingPatient(null)}>
-        <DialogContent className="max-w-2xl rounded-3xl border-none shadow-2xl p-0 overflow-hidden">
-           <div className="bg-emerald-600 p-10 text-white relative">
-             <HeartPulse className="absolute top-6 right-6 w-20 h-20 opacity-10" />
-             <h3 className="text-3xl font-black mb-2">Detail Pasien</h3>
-             <p className="text-emerald-100 font-bold text-sm tracking-widest uppercase">Informasi Kesehatan Terpusat</p>
-           </div>
-           <div className="p-10 space-y-8">
-              {viewingPatient && (
-                <div className="grid grid-cols-2 gap-8">
-                  <div className="space-y-1">
-                    <Label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Nama Lengkap</Label>
-                    <p className="text-lg font-bold text-emerald-950">{viewingPatient.nama}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">No. RM</Label>
-                    <p className="text-lg font-mono font-bold text-emerald-600">{viewingPatient.no_rm}</p>
-                  </div>
-                  <div className="space-y-1 col-span-2">
-                    <Label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Alamat</Label>
-                    <p className="text-gray-700 font-medium">{viewingPatient.alamat}</p>
-                  </div>
-                </div>
-              )}
-              <Button className="w-full h-14 bg-emerald-600 hover:bg-emerald-700 rounded-2xl font-black text-white" onClick={() => setViewingPatient(null)}>
-                Tutup Detail
-              </Button>
-           </div>
-        </DialogContent>
-      </Dialog>
-    </div>
+       </div>
+    </Card>
   );
 }
 
-// --- Additional Feature Views ---
 
-function VisitsView({ isAdmin, onAction }: { isAdmin: boolean, onAction: () => void }) {
-  const [visits] = useState(DatabaseService.getVisits());
-  
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h3 className="text-xl font-black text-emerald-900">Catatan Kunjungan</h3>
-        {isAdmin && <Button onClick={onAction} className="bg-emerald-600 rounded-xl px-6 h-12 font-bold shadow-lg shadow-emerald-200"><Plus className="w-4 h-4 mr-2"/> Kunjungan Baru</Button>}
-      </div>
-      <Card className="border-none shadow-xl shadow-green-900/5 rounded-3xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-emerald-50/50 border-b border-green-100 text-left">
-              <tr>
-                <th className="p-6 text-[10px] font-black uppercase text-emerald-800 tracking-widest">Tanggal</th>
-                <th className="p-6 text-[10px] font-black uppercase text-emerald-800 tracking-widest">Pasien</th>
-                <th className="p-6 text-[10px] font-black uppercase text-emerald-800 tracking-widest">Keluhan</th>
-                <th className="p-6 text-[10px] font-black uppercase text-emerald-800 tracking-widest text-right">Aksi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-green-50">
-              {visits.length === 0 ? (
-                <tr><td colSpan={4} className="p-12 text-center text-gray-400 font-medium">Belum ada data kunjungan</td></tr>
-              ) : (
-                visits.map(v => {
-                  const patient = DatabaseService.getPatientById(v.patient_id);
-                  const anyV = v as any;
-                  return (
-                    <tr key={v.id} className="hover:bg-emerald-50/30 transition-colors">
-                      <td className="p-6 text-sm font-bold text-gray-900">{v.tanggal_kunjungan}</td>
-                      <td className="p-6">
-                        <p className="text-sm font-bold text-emerald-950">{patient?.nama || 'Pasien tidak ditemukan'}</p>
-                        <p className="text-[10px] font-mono text-emerald-600 font-bold">{v.patient_id}</p>
-                      </td>
-                      <td className="p-6 text-sm text-gray-600 font-medium">{v.keluhan || anyV.keluhan_utama || '-'}</td>
-                      <td className="p-6 text-right">
-                        <Button variant="ghost" size="sm" className="rounded-xl hover:bg-emerald-100 hover:text-emerald-700 font-bold">Detail</Button>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-function ImmunizationsView({ isAdmin, onAction }: { isAdmin: boolean, onAction: () => void }) {
-  const [immunizations] = useState(DatabaseService.getImmunizations());
-  
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h3 className="text-xl font-black text-emerald-900">Data Imunisasi</h3>
-        {isAdmin && <Button onClick={onAction} className="bg-emerald-600 rounded-xl px-6 h-12 font-bold shadow-lg shadow-emerald-200"><Syringe className="w-4 h-4 mr-2"/> Catat Imunisasi</Button>}
-      </div>
-      <Card className="border-none shadow-xl shadow-green-900/5 rounded-3xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-emerald-50/50 border-b border-green-100 text-left">
-              <tr>
-                <th className="p-6 text-[10px] font-black uppercase text-emerald-800 tracking-widest">Tanggal</th>
-                <th className="p-6 text-[10px] font-black uppercase text-emerald-800 tracking-widest">Pasien</th>
-                <th className="p-6 text-[10px] font-black uppercase text-emerald-800 tracking-widest">Jenis Vaksin</th>
-                <th className="p-6 text-[10px] font-black uppercase text-emerald-800 tracking-widest">Keterangan</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-green-50">
-               {immunizations.length === 0 ? (
-                <tr><td colSpan={4} className="p-12 text-center text-gray-400 font-medium">Belum ada data imunisasi</td></tr>
-              ) : (
-                immunizations.map(i => {
-                  const patient = DatabaseService.getPatientById(i.patient_id);
-                  const anyI = i as any;
-                  return (
-                    <tr key={i.id} className="hover:bg-emerald-50/30 transition-colors">
-                      <td className="p-6 text-sm font-bold text-gray-900">{i.tanggal}</td>
-                      <td className="p-6">
-                        <p className="text-sm font-bold text-emerald-950">{patient?.nama || 'Pasien tidak ditemukan'}</p>
-                      </td>
-                      <td className="p-6"><Badge className="bg-emerald-100 text-emerald-700 border-none font-bold">{i.jenis_imunisasi || anyI.jenis_vaksin}</Badge></td>
-                      <td className="p-6 text-sm text-gray-600 font-medium">{i.keterangan || '-'}</td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-function GrowthView({ isAdmin, onAction }: { isAdmin: boolean, onAction: () => void }) {
-  const [growth] = useState(DatabaseService.getGrowthRecords());
-  
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h3 className="text-xl font-black text-emerald-900">Data Pertumbuhan</h3>
-        {isAdmin && <Button onClick={onAction} className="bg-emerald-600 rounded-xl px-6 h-12 font-bold shadow-lg shadow-emerald-200"><Baby className="w-4 h-4 mr-2"/> Ukur Balita</Button>}
-      </div>
-      <Card className="border-none shadow-xl shadow-green-900/5 rounded-3xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-emerald-50/50 border-b border-green-100 text-left">
-              <tr>
-                <th className="p-6 text-[10px] font-black uppercase text-emerald-800 tracking-widest">Tanggal</th>
-                <th className="p-6 text-[10px] font-black uppercase text-emerald-800 tracking-widest">Pasien</th>
-                <th className="p-6 text-[10px] font-black uppercase text-emerald-800 tracking-widest">BB (kg)</th>
-                <th className="p-6 text-[10px] font-black uppercase text-emerald-800 tracking-widest">TB (cm)</th>
-                <th className="p-6 text-[10px] font-black uppercase text-emerald-800 tracking-widest">Status Gizi</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-green-50">
-              {growth.length === 0 ? (
-                <tr><td colSpan={5} className="p-12 text-center text-gray-400 font-medium">Belum ada data pertumbuhan</td></tr>
-              ) : (
-                growth.map(g => {
-                  const patient = DatabaseService.getPatientById(g.patient_id);
-                  const anyG = g as any;
-                  return (
-                    <tr key={g.id} className="hover:bg-emerald-50/30 transition-colors">
-                      <td className="p-6 text-sm font-bold text-gray-900">{g.tanggal || anyG.tanggal_pengukuran}</td>
-                      <td className="p-6 text-sm font-bold text-emerald-950">{patient?.nama || 'Pasien tidak ditemukan'}</td>
-                      <td className="p-6 text-sm font-black text-emerald-700">{g.berat_badan}</td>
-                      <td className="p-6 text-sm font-black text-emerald-700">{g.tinggi_badan}</td>
-                      <td className="p-6">
-                        <Badge className="bg-green-100 text-green-700 border-none font-bold uppercase text-[9px] tracking-widest">{g.status_gizi || 'Normal'}</Badge>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-function VitaminsView({ isAdmin, onAction }: { isAdmin: boolean, onAction: () => void }) {
-  const [vitamins] = useState(DatabaseService.getVitaminDistributions());
-  
-  return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h3 className="text-xl font-black text-emerald-900">Distribusi Vitamin</h3>
-        {isAdmin && <Button onClick={onAction} className="bg-emerald-600 rounded-xl px-6 h-12 font-bold shadow-lg shadow-emerald-200"><Pill className="w-4 h-4 mr-2"/> Beri Vitamin</Button>}
-      </div>
-      <Card className="border-none shadow-xl shadow-green-900/5 rounded-3xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-emerald-50/50 border-b border-green-100 text-left">
-              <tr>
-                <th className="p-6 text-[10px] font-black uppercase text-emerald-800 tracking-widest">Tanggal</th>
-                <th className="p-6 text-[10px] font-black uppercase text-emerald-800 tracking-widest">Pasien</th>
-                <th className="p-6 text-[10px] font-black uppercase text-emerald-800 tracking-widest">Jenis Vitamin</th>
-                <th className="p-6 text-[10px] font-black uppercase text-emerald-800 tracking-widest">Jumlah</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-green-50">
-              {vitamins.length === 0 ? (
-                <tr><td colSpan={4} className="p-12 text-center text-gray-400 font-medium">Belum ada data vitamin</td></tr>
-              ) : (
-                vitamins.map(v => {
-                  const patient = DatabaseService.getPatientById(v.patient_id);
-                  const anyV = v as any;
-                  return (
-                    <tr key={v.id} className="hover:bg-emerald-50/30 transition-colors">
-                      <td className="p-6 text-sm font-bold text-gray-900">{v.tanggal || anyV.tanggal_pemberian}</td>
-                      <td className="p-6 text-sm font-bold text-emerald-950">{patient?.nama || 'Pasien tidak ditemukan'}</td>
-                      <td className="p-6 font-black text-emerald-700 uppercase text-xs">{v.jenis_vitamin}</td>
-                      <td className="p-6 text-sm text-gray-600 font-bold">{v.jumlah || anyV.dosis}</td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
-    </div>
-  );
-}

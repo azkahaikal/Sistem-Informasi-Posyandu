@@ -1,7 +1,7 @@
 // Database service using localStorage for simplicity
 // In production, this should be replaced with a proper backend API
 
-import type { Patient, Visit, Immunization, GrowthRecord, VitaminDistribution, DashboardStats } from '@/types';
+import type { Patient, Visit, Immunization, GrowthRecord, VitaminDistribution, DashboardStats, UserAccount, MealPlan, AppNotification } from '@/types';
 
 const DB_KEYS = {
   PATIENTS: 'posyandu_patients',
@@ -9,10 +9,58 @@ const DB_KEYS = {
   IMMUNIZATIONS: 'posyandu_immunizations',
   GROWTH_RECORDS: 'posyandu_growth_records',
   VITAMINS: 'posyandu_vitamins',
+  USERS: 'posyandu_users',
+  NOTIFICATIONS: 'posyandu_notifications',
 };
 
 // Generic CRUD operations
 class DatabaseService {
+  // Notifications
+  static getNotifications(): AppNotification[] {
+    const data = localStorage.getItem(DB_KEYS.NOTIFICATIONS);
+    try {
+      return data ? JSON.parse(data) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  static saveNotification(notif: AppNotification): void {
+    const notifs = this.getNotifications();
+    notifs.push(notif);
+    localStorage.setItem(DB_KEYS.NOTIFICATIONS, JSON.stringify(notifs));
+  }
+
+  static markNotificationAsRead(id: string): void {
+    const notifs = this.getNotifications();
+    const index = notifs.findIndex(n => n.id === id);
+    if (index >= 0) {
+      notifs[index].is_read = true;
+      localStorage.setItem(DB_KEYS.NOTIFICATIONS, JSON.stringify(notifs));
+    }
+  }
+  // User Management
+  static getUsers(): UserAccount[] {
+    const data = localStorage.getItem(DB_KEYS.USERS);
+    try {
+      return data ? JSON.parse(data) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  static saveUser(user: UserAccount): void {
+    const users = this.getUsers();
+    const index = users.findIndex(u => u.id === user.id);
+    if (index >= 0) users[index] = user;
+    else users.push({ ...user, created_at: new Date().toISOString() });
+    localStorage.setItem(DB_KEYS.USERS, JSON.stringify(users));
+  }
+
+  static deleteUser(id: string): void {
+    const users = this.getUsers().filter(u => u.id !== id);
+    localStorage.setItem(DB_KEYS.USERS, JSON.stringify(users));
+  }
   // Patients
   static getPatients(): Patient[] {
     const data = localStorage.getItem(DB_KEYS.PATIENTS);
@@ -50,6 +98,19 @@ class DatabaseService {
   static deletePatient(id: string): void {
     const patients = this.getPatients().filter(p => p.id !== id);
     localStorage.setItem(DB_KEYS.PATIENTS, JSON.stringify(patients));
+
+    // Delete associated data
+    const growthRecords = this.getGrowthRecords().filter(r => r.patient_id !== id);
+    localStorage.setItem(DB_KEYS.GROWTH_RECORDS, JSON.stringify(growthRecords));
+
+    const visits = this.getVisits().filter(v => v.patient_id !== id);
+    localStorage.setItem(DB_KEYS.VISITS, JSON.stringify(visits));
+
+    const immunizations = this.getImmunizations().filter(i => i.patient_id !== id);
+    localStorage.setItem(DB_KEYS.IMMUNIZATIONS, JSON.stringify(immunizations));
+
+    const vitamins = this.getVitaminDistributions().filter(v => v.patient_id !== id);
+    localStorage.setItem(DB_KEYS.VITAMINS, JSON.stringify(vitamins));
   }
 
   static generateNoRM(jenisPasien: 'ibu_hamil' | 'balita' | 'bayi'): string {
@@ -163,6 +224,11 @@ class DatabaseService {
     localStorage.setItem(DB_KEYS.GROWTH_RECORDS, JSON.stringify(records));
   }
 
+  static deleteGrowthRecord(id: string): void {
+    const records = this.getGrowthRecords().filter(r => r.id !== id);
+    localStorage.setItem(DB_KEYS.GROWTH_RECORDS, JSON.stringify(records));
+  }
+
   // Vitamin Distribution
   static getVitaminDistributions(): VitaminDistribution[] {
     const data = localStorage.getItem(DB_KEYS.VITAMINS);
@@ -194,14 +260,45 @@ class DatabaseService {
     localStorage.setItem(DB_KEYS.VITAMINS, JSON.stringify(vitamins));
   }
 
+  // Meal Plans
+  static getMealPlans(): MealPlan[] {
+    const data = localStorage.getItem('posyandu_meal_plans');
+    try {
+      return data ? JSON.parse(data) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  static getMealPlanByPatient(patientId: string): MealPlan | null {
+    return this.getMealPlans().find(m => m.patient_id === patientId) || null;
+  }
+
+  static saveMealPlan(plan: MealPlan): void {
+    const plans = this.getMealPlans();
+    const index = plans.findIndex(m => m.id === plan.id);
+    if (index >= 0) plans[index] = plan;
+    else plans.push(plan);
+    localStorage.setItem('posyandu_meal_plans', JSON.stringify(plans));
+  }
+
   // Dashboard Stats
   static getDashboardStats(): DashboardStats {
     const patients = this.getPatients();
     const visits = this.getVisits();
     const immunizations = this.getImmunizations();
+    const growth = this.getGrowthRecords();
     
     const today = new Date().toISOString().split('T')[0];
     const currentMonth = new Date().toISOString().slice(0, 7);
+
+    // Latest growth for each patient to determine current status
+    const latestGrowth = patients.map(p => {
+      const pGrowth = growth
+        .filter(g => g.patient_id === p.id)
+        .sort((a, b) => new Date(b.tanggal).getTime() - new Date(a.tanggal).getTime());
+      return pGrowth[0];
+    }).filter(Boolean);
     
     return {
       total_pasien: patients.length,
@@ -211,6 +308,9 @@ class DatabaseService {
       kunjungan_hari_ini: visits.filter(v => v.tanggal_kunjungan === today).length,
       kunjungan_bulan_ini: visits.filter(v => v.tanggal_kunjungan.startsWith(currentMonth)).length,
       imunisasi_bulan_ini: immunizations.filter(i => i.tanggal.startsWith(currentMonth)).length,
+      stunting_count: latestGrowth.filter(g => g.status_gizi?.includes('Stunted') || g.status_gizi?.includes('Pendek')).length,
+      gizi_buruk_count: latestGrowth.filter(g => g.status_gizi?.includes('Buruk')).length,
+      gizi_kurang_count: latestGrowth.filter(g => g.status_gizi?.includes('Kurang')).length,
     };
   }
 

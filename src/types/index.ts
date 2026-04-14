@@ -1,8 +1,20 @@
 // Types for Posyandu Information System
 
-export type PatientType = 'ibu_hamil' | 'balita' | 'bayi';
+export type PatientType = 'ibu_hamil' | 'ibu_menyusui' | 'balita' | 'bayi';
 export type Gender = 'L' | 'P';
 export type BloodType = 'A' | 'B' | 'AB' | 'O' | 'Tidak Tahu';
+
+export type UserRole = 'admin' | 'nakes' | 'orang_tua';
+
+export interface UserAccount {
+  id: string;
+  username: string;
+  nama: string;
+  role: UserRole;
+  patient_id?: string; // Link to patient data if role is orang_tua
+  password?: string;
+  created_at: string;
+}
 
 export interface Patient {
   id: string;
@@ -20,17 +32,31 @@ export interface Patient {
   no_telp?: string;
   golongan_darah?: BloodType;
   
+  // Location for Mapping
+  latitude?: number;
+  longitude?: number;
+  
+  // Media & History
+  foto?: string; // base64
+  dokumen?: { name: string; url: string; date: string }[];
+  riwayat_penyakit?: string[];
+  alergi_makanan?: string[];
+  
   // For ibu hamil
   nama_suami?: string;
   hpht?: string; // Hari Pertama Haid Terakhir
   htp?: string; // Hari Taksir Persalinan
   kehamilan_ke?: number;
+  gravida?: number; // Kehamilan ke-
+  para?: number; // Melahirkan ke-
+  abortus?: number; // Keguguran
   
   // For balita/bayi
   nama_ayah?: string;
   nama_ibu?: string;
   berat_lahir?: number; // kg
   panjang_lahir?: number; // cm
+  lingkar_kepala_lahir?: number; // cm
   
   // Metadata
   jenis_pasien: PatientType;
@@ -78,6 +104,15 @@ export interface Immunization {
   created_at: string;
 }
 
+export interface AppNotification {
+  id: string;
+  patient_id: string;
+  pesan: string;
+  tanggal: string;
+  tipe: 'imunisasi' | 'pemeriksaan' | 'sistem';
+  is_read: boolean;
+}
+
 export interface GrowthRecord {
   id: string;
   patient_id: string;
@@ -85,7 +120,20 @@ export interface GrowthRecord {
   berat_badan: number;
   tinggi_badan: number;
   lingkar_kepala?: number;
-  status_gizi?: 'baik' | 'kurang' | 'buruk' | 'lebih';
+  lingkar_lengan?: number;
+  
+  // Media support
+  foto?: string;
+  dokumen_url?: string;
+  
+  // Z-Scores (WHO Standard)
+  wfa_zscore?: number; // Weight-for-Age
+  hfa_zscore?: number; // Height-for-Age
+  wfh_zscore?: number; // Weight-for-Height
+  
+  status_gizi?: string; // Gizi Baik, Kurang, Buruk, Stunting, etc.
+  keterangan?: string;
+  petugas?: string;
   created_at: string;
 }
 
@@ -99,6 +147,31 @@ export interface VitaminDistribution {
   created_at: string;
 }
 
+export interface MealPlan {
+  id: string;
+  patient_id: string;
+  jenis_rencana: 'ibu_hamil' | 'ibu_menyusui' | 'balita';
+  kategori_usia?: string; // e.g., "6-11 bulan", "Trimester 1"
+  tanggal_dibuat: string;
+  alergi_dihindari: string[];
+  menu_mingguan: {
+    hari: 'Senin' | 'Selasa' | 'Rabu' | 'Kamis' | 'Jumat' | 'Sabtu' | 'Minggu';
+    pagi: string;
+    snack_pagi: string;
+    siang: string;
+    snack_sore: string;
+    malam: string;
+  }[];
+  target_nutrisi: {
+    kalori: number;
+    protein: number;
+    karbohidrat: number;
+    lemak: number;
+    zat_besi?: number;
+    asam_folat?: number;
+  };
+}
+
 export interface DashboardStats {
   total_pasien: number;
   total_ibu_hamil: number;
@@ -107,6 +180,10 @@ export interface DashboardStats {
   kunjungan_hari_ini: number;
   kunjungan_bulan_ini: number;
   imunisasi_bulan_ini: number;
+  // New Stats
+  stunting_count: number;
+  gizi_buruk_count: number;
+  gizi_kurang_count: number;
 }
 
 // Available immunization types in Indonesia
